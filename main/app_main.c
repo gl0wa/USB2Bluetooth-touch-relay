@@ -23,10 +23,10 @@
 #define PIN_BUTTON GPIO_NUM_0
 #define PIN_LED GPIO_NUM_21
 #define PC_DETECT_MS 1500       // time allowed for a PC to show up on USB after reset
-#define HEALTHY_AFTER_S 30      // uptime on Wi-Fi before a new OTA image is accepted
-#define ROLLBACK_AFTER_S 180    // give up on an unconfirmed image if Wi-Fi never comes up
+#define HEALTHY_S 30            // continuous Wi-Fi, then touch device, needed to confirm an image
+#define ROLLBACK_AFTER_S 180    // give up on an unconfirmed image if Wi-Fi never stabilises
 #define FORGET_HOLD_MS 5000
-#define EDGE_RETRY_MS 200
+#define PRESS_RETRY_MS 200
 
 typedef struct {
     bool down;
@@ -43,28 +43,45 @@ void relay_submit(bool down, uint16_t x, uint16_t y)
     touch_evt_t e = {.down = down};
     touch_map_apply(&s_map, x, y, &e.x, &e.y);
     if (xQueueSend(s_touch_q, &e, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "touch queue full");
+        // Drop the oldest, so the newest state (possibly a release) always survives.
+        touch_evt_t old;
+        xQueueReceive(s_touch_q, &old, 0);
+        xQueueSend(s_touch_q, &e, 0);
     }
 }
 
-// Coalesces moves when BLE is slower than the panel, but never drops a press or release.
+// Coalesces moves when BLE is slower than the panel. `sent_down` follows what the
+// host was actually told, so a lost press is re-sent as a press by the next move,
+// and a release is retried for as long as the connection lasts.
 static void relay_task(void *arg)
 {
     (void)arg;
     touch_evt_t e, next;
-    bool was_down = false;
+    bool sent_down = false;
     for (;;) {
         xQueueReceive(s_touch_q, &e, portMAX_DELAY);
-        while (e.down && was_down && xQueuePeek(s_touch_q, &next, 0) == pdTRUE && next.down) {
+        while (e.down && sent_down && xQueuePeek(s_touch_q, &next, 0) == pdTRUE && next.down) {
             xQueueReceive(s_touch_q, &e, 0);
         }
-        bool edge = e.down != was_down;
-        int64_t deadline = esp_timer_get_time() + EDGE_RETRY_MS * 1000;
-        while (!ble_hogp_send_touch(e.down, e.x, e.y) && edge && ble_hogp_ready() &&
-               esp_timer_get_time() < deadline) {
-            vTaskDelay(pdMS_TO_TICKS(5));
+        if (!ble_hogp_ready()) {
+            sent_down = false; // the host drops the contact with the connection
+            continue;
         }
-        was_down = e.down;
+        bool sent = ble_hogp_send_touch(e.down, e.x, e.y);
+        if (!e.down && sent_down) {
+            while (!sent && ble_hogp_ready()) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+                sent = ble_hogp_send_touch(false, e.x, e.y);
+            }
+            sent_down = false;
+        } else if (e.down && !sent_down) {
+            int64_t deadline = esp_timer_get_time() + PRESS_RETRY_MS * 1000;
+            while (!sent && ble_hogp_ready() && esp_timer_get_time() < deadline) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+                sent = ble_hogp_send_touch(true, e.x, e.y);
+            }
+            sent_down = sent;
+        }
     }
 }
 
@@ -99,16 +116,44 @@ static bool pc_attached(void)
     return false;
 }
 
+// An image is confirmed only once it has run the path most likely to crash it:
+// stable Wi-Fi, then a touch device attached in USB host mode. Until then any reset
+// rolls back. Without a touch device it stays unconfirmed but keeps running, and
+// `POST /confirm` or the next OTA upload accepts it.
 static void check_rollback(bool *pending)
 {
-    int64_t up_s = esp_timer_get_time() / 1000000;
-    if (netsvc_connected() && up_s >= HEALTHY_AFTER_S) {
-        esp_ota_mark_app_valid_cancel_rollback();
-        *pending = false;
-        ESP_LOGI(TAG, "image confirmed");
-    } else if (up_s >= ROLLBACK_AFTER_S) {
-        ESP_LOGE(TAG, "image not confirmed, rolling back");
-        esp_ota_mark_app_invalid_rollback_and_reboot();
+    static int64_t wifi_since, touch_since;
+    static bool wifi_proven;
+    int64_t now = esp_timer_get_time() / 1000000;
+
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) != ESP_OK ||
+        state != ESP_OTA_IMG_PENDING_VERIFY) {
+        *pending = false; // confirmed through the network API
+        return;
+    }
+
+    wifi_since = !netsvc_connected() ? 0 : wifi_since ? wifi_since : now;
+    wifi_proven |= wifi_since && now - wifi_since >= HEALTHY_S;
+    if (!wifi_proven) {
+        if (now >= ROLLBACK_AFTER_S) {
+            ESP_LOGE(TAG, "no stable Wi-Fi on the new image, rolling back");
+            esp_ota_mark_app_invalid_rollback_and_reboot();
+        }
+        return;
+    }
+
+    usb_touch_status_t u;
+    usb_touch_get_status(&u);
+    touch_since = !u.has_touch ? 0 : touch_since ? touch_since : now;
+    if (touch_since && now - touch_since >= HEALTHY_S) {
+        esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+        if (err == ESP_OK) {
+            *pending = false;
+            ESP_LOGI(TAG, "image confirmed");
+        } else {
+            ESP_LOGE(TAG, "confirm failed: %s", esp_err_to_name(err));
+        }
     }
 }
 

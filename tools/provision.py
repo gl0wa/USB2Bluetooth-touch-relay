@@ -6,6 +6,7 @@ The token is saved to .local/device.env, which git ignores. The Wi-Fi password
 is read from U2B_WIFI_PASS or a prompt and is never stored on this computer.
 """
 import argparse
+import csv
 import getpass
 import os
 import secrets
@@ -43,8 +44,8 @@ def main():
     password = os.environ.get("U2B_WIFI_PASS")
     if password is None:
         password = getpass.getpass("Wi-Fi password (empty for an open network): ")
-    if not ssid or len(ssid) > 32 or len(password) > 63:
-        sys.exit("SSID must be 1-32 bytes and the password at most 63")
+    if not 1 <= len(ssid.encode()) <= 32 or len(password.encode()) > 63:
+        sys.exit("SSID must be 1-32 bytes and the password at most 63 bytes")
 
     env = read_env()
     token = env.get("U2B_TOKEN") or secrets.token_urlsafe(32)
@@ -56,11 +57,13 @@ def main():
     generator = Path(idf_path) / "components/nvs_flash/nvs_partition_generator/nvs_partition_gen.py"
     with tempfile.TemporaryDirectory() as tmp:
         csv_path, bin_path = Path(tmp) / "devcfg.csv", Path(tmp) / "devcfg.bin"
-        rows = ["key,type,encoding,value", "net,namespace,,", f"ssid,data,string,{ssid}", f"token,data,string,{token}"]
+        rows = [["key", "type", "encoding", "value"], ["net", "namespace", "", ""],
+                ["ssid", "data", "string", ssid], ["token", "data", "string", token]]
         if password:
-            rows.append(f"pass,data,string,{password}")
-        csv_path.write_text("\n".join(rows) + "\n")
-        csv_path.chmod(0o600)
+            rows.append(["pass", "data", "string", password])
+        fd = os.open(csv_path, os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "w", newline="") as f:
+            csv.writer(f).writerows(rows)  # SSIDs and passwords may contain commas or quotes
         subprocess.run([sys.executable, str(generator), "generate", str(csv_path), str(bin_path), DEVCFG_SIZE],
                        check=True, stdout=subprocess.DEVNULL)
         subprocess.run([sys.executable, "-m", "esptool", "--chip", "esp32s3", "-p", args.port,

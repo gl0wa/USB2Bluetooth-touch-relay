@@ -15,6 +15,7 @@
 #define MAX_IFACES 4
 #define MAX_DESC 1024
 #define RAW_LOG_LIMIT 64 // reports logged in hex per attach, for bring-up
+#define MAX_RECOVERIES 5
 
 typedef struct {
     hid_host_device_handle_t h;
@@ -24,7 +25,15 @@ typedef struct {
     ht_layout_t layout;
     ht_state_t state;
     uint32_t raw_logged;
+    uint8_t recoveries; // attempts since the last good report
 } iface_t;
+
+typedef enum { EVT_CONNECTED, EVT_RECOVER } evt_type_t;
+
+typedef struct {
+    evt_type_t type;
+    hid_host_device_handle_t h;
+} evt_t;
 
 static const char *TAG = "usb";
 static iface_t s_if[MAX_IFACES];
@@ -58,6 +67,7 @@ static iface_t *find_iface(hid_host_device_handle_t h)
 static void choose_active(void)
 {
     int best = -1;
+    taskENTER_CRITICAL(&s_lock);
     for (int i = 0; i < MAX_IFACES; i++) {
         if (s_if[i].h && s_if[i].layout.kind != HT_KIND_NONE &&
             (best < 0 || s_if[i].layout.kind > s_if[best].layout.kind)) {
@@ -70,8 +80,10 @@ static void choose_active(void)
         s_st.kind = (uint8_t)s_if[best].layout.kind;
         s_st.iface = s_if[best].iface;
         s_st.contacts = s_if[best].layout.contacts;
-        ESP_LOGI(TAG, "using interface %u: kind=%d contacts=%d report_id=%d", s_st.iface, s_st.kind,
-                 s_st.contacts, s_if[best].layout.report_id);
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    if (best >= 0) {
+        ESP_LOGI(TAG, "using interface %u: kind=%d contacts=%d", s_st.iface, s_st.kind, s_st.contacts);
     }
 }
 
@@ -83,6 +95,7 @@ static void on_report(iface_t *f)
         return;
     }
     s_st.reports++;
+    f->recoveries = 0;
     if (f->raw_logged < RAW_LOG_LIMIT) {
         f->raw_logged++;
         log_hex(f == &s_if[s_active < 0 ? 0 : s_active] ? "in" : "in-other", data, len);
@@ -113,6 +126,11 @@ static void iface_event(hid_host_device_handle_t h, const hid_host_interface_eve
     case HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR:
         s_st.errors++;
         ESP_LOGW(TAG, "transfer error");
+        {
+            // The driver does not resubmit a failed transfer, so input stops until restarted.
+            evt_t e = {.type = EVT_RECOVER, .h = h};
+            xQueueSend(s_events, &e, 0);
+        }
         break;
     case HID_HOST_INTERFACE_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "interface disconnected");
@@ -144,10 +162,31 @@ static void open_iface(hid_host_device_handle_t h)
     if (hid_host_device_get_params(h, &p) != ESP_OK) {
         return;
     }
+    // Reserve the slot first, so a disconnect during setup can find it.
+    taskENTER_CRITICAL(&s_lock);
+    iface_t *f = find_iface(NULL);
+    if (f) {
+        f->h = h;
+        f->iface = p.iface_num;
+        f->desc_len = 0;
+        f->raw_logged = 0;
+        f->recoveries = 0;
+        memset(&f->state, 0, sizeof f->state);
+        memset(&f->layout, 0, sizeof f->layout);
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    if (!f) {
+        ESP_LOGW(TAG, "too many interfaces, ignoring %u", p.iface_num);
+        return;
+    }
+
     const hid_host_device_config_t cfg = {.callback = iface_event};
     esp_err_t err = hid_host_device_open(h, &cfg);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "open iface %u: %s", p.iface_num, esp_err_to_name(err));
+        taskENTER_CRITICAL(&s_lock);
+        f->h = NULL;
+        taskEXIT_CRITICAL(&s_lock);
         return;
     }
 
@@ -158,30 +197,30 @@ static void open_iface(hid_host_device_handle_t h)
     }
     ESP_LOGI(TAG, "HID %04x:%04x iface=%u subclass=%u proto=%u", s_st.vid, s_st.pid, p.iface_num, p.sub_class, p.proto);
 
-    iface_t *f = find_iface(NULL);
-    if (!f) {
-        ESP_LOGW(TAG, "too many interfaces, ignoring %u", p.iface_num);
-        hid_host_device_close(h);
-        return;
-    }
     size_t len = 0;
     const uint8_t *desc = hid_host_get_report_descriptor(h, &len);
-    memset(&f->state, 0, sizeof f->state);
-    f->raw_logged = 0;
-    f->iface = p.iface_num;
-    memset(&f->layout, 0, sizeof f->layout);
     if (desc && len) {
+        // The driver frees its copy on disconnect, so take ours straight away.
         size_t keep = len < MAX_DESC ? len : MAX_DESC;
-        log_hex("desc", desc, len);
-        ht_parse_descriptor(desc, len, &f->layout);
-        taskENTER_CRITICAL(&s_lock);
         memcpy(f->desc, desc, keep);
         f->desc_len = (uint16_t)keep;
-        taskEXIT_CRITICAL(&s_lock);
+        log_hex("desc", f->desc, keep);
+        ht_parse_descriptor(f->desc, keep, &f->layout);
     } else {
         ESP_LOGW(TAG, "no report descriptor on iface %u", p.iface_num);
     }
-    f->h = h;
+
+    // A disconnect during setup clears the slot; the handle is then already closed.
+    taskENTER_CRITICAL(&s_lock);
+    bool still_here = f->h == h;
+    if (!still_here) {
+        f->desc_len = 0;
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    if (!still_here) {
+        ESP_LOGW(TAG, "iface %u went away during setup", p.iface_num);
+        return;
+    }
     s_st.attached = true;
     choose_active();
 
@@ -191,11 +230,37 @@ static void open_iface(hid_host_device_handle_t h)
     }
 }
 
+static void recover_iface(hid_host_device_handle_t h)
+{
+    iface_t *f = find_iface(h);
+    if (!f) {
+        return;
+    }
+    if (s_active >= 0 && f == &s_if[s_active] && f->state.tracking) {
+        f->state.tracking = false;
+        relay_submit(false, 0, 0);
+    }
+    if (f->recoveries >= MAX_RECOVERIES) {
+        ESP_LOGE(TAG, "iface %u: giving up after %d restarts", f->iface, MAX_RECOVERIES);
+        taskENTER_CRITICAL(&s_lock);
+        f->layout.kind = HT_KIND_NONE; // reported as no touch device, so the LED shows it
+        taskEXIT_CRITICAL(&s_lock);
+        choose_active();
+        return;
+    }
+    f->recoveries++;
+    vTaskDelay(pdMS_TO_TICKS(100 * f->recoveries));
+    hid_host_device_stop(h);
+    esp_err_t err = hid_host_device_start(h);
+    ESP_LOGW(TAG, "iface %u restart %d: %s", f->iface, f->recoveries, esp_err_to_name(err));
+}
+
 static void driver_event(hid_host_device_handle_t h, const hid_host_driver_event_t ev, void *arg)
 {
     (void)arg;
     if (ev == HID_HOST_DRIVER_EVENT_CONNECTED) {
-        xQueueSend(s_events, &h, 0); // opening blocks, so leave the driver callback first
+        evt_t e = {.type = EVT_CONNECTED, .h = h};
+        xQueueSend(s_events, &e, 0); // opening blocks, so leave the driver callback first
     }
 }
 
@@ -214,10 +279,14 @@ static void lib_task(void *arg)
 static void app_task(void *arg)
 {
     (void)arg;
-    hid_host_device_handle_t h;
+    evt_t e;
     for (;;) {
-        if (xQueueReceive(s_events, &h, portMAX_DELAY) == pdTRUE) {
-            open_iface(h);
+        if (xQueueReceive(s_events, &e, portMAX_DELAY) == pdTRUE) {
+            if (e.type == EVT_CONNECTED) {
+                open_iface(e.h);
+            } else {
+                recover_iface(e.h);
+            }
         }
     }
 }
@@ -226,9 +295,9 @@ void usb_touch_start(void)
 {
     const usb_host_config_t host = {.skip_phy_setup = false, .intr_flags = ESP_INTR_FLAG_LEVEL1};
     ESP_ERROR_CHECK(usb_host_install(&host));
-    s_events = xQueueCreate(8, sizeof(hid_host_device_handle_t));
+    s_events = xQueueCreate(8, sizeof(evt_t));
     xTaskCreate(lib_task, "usb_lib", 4096, NULL, 6, NULL);
-    xTaskCreate(app_task, "usb_app", 6144, NULL, 4, NULL);
+    xTaskCreate(app_task, "usb_app", 8192, NULL, 4, NULL);
     const hid_host_driver_config_t drv = {
         .create_background_task = true,
         .task_priority = 5,

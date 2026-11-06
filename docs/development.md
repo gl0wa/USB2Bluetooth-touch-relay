@@ -44,11 +44,19 @@ python3 tools/u2b.py swipe 0.2 0.5 0.8 0.5
 ```
 
 The device answers at `u2b-touch.local`; set `U2B_HOST` if mDNS is unavailable. Every
-endpoint needs the token. Traffic is plain HTTP and images are not signed, so
-use it only on a trusted network.
+endpoint needs the token.
 
-A new image must reach Wi-Fi and run for 30 s before it is confirmed. If it crashes
-first, or has no Wi-Fi after 180 s, the bootloader returns to the previous image.
+**Security limitation:** traffic is plain HTTP and images are not signed. Anyone
+who can capture traffic on the network can read the token and reuse it to upload
+firmware or inject touches. Use it only on a trusted network.
+
+A new image is confirmed after 30 s of stable Wi-Fi followed by 30 s with a touch
+device attached in USB host mode. Until then any reset returns to the previous
+image, and without stable Wi-Fi for 180 s it rolls back by itself. With no touch
+device it keeps running unconfirmed: use `tools/u2b.py confirm` to accept it, or
+upload another image, which accepts the running one first because OTA cannot start
+otherwise. The previous image is then overwritten, so a bad upload falls back only
+to the image that received it.
 
 ## Inspecting the monitor from a Mac
 

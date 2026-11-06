@@ -25,6 +25,7 @@
 #define HOSTNAME "u2b-touch"
 #define TOKEN_MAX 65
 #define OTA_CHUNK 4096
+#define OTA_MAX_IDLE 2 // receive timeouts tolerated, at recv_wait_timeout each
 
 static const char *TAG = "net";
 static char s_token[TOKEN_MAX];
@@ -49,6 +50,13 @@ static bool authorised(httpd_req_t *r)
     return ok;
 }
 
+static bool running_unconfirmed(void)
+{
+    esp_ota_img_states_t state;
+    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+           state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
 static esp_err_t h_status(httpd_req_t *r)
 {
     if (!authorised(r)) {
@@ -63,13 +71,13 @@ static esp_err_t h_status(httpd_req_t *r)
     const esp_partition_t *run = esp_ota_get_running_partition();
     char out[640];
     int n = snprintf(out, sizeof out,
-                     "{\"version\":\"%s\",\"partition\":\"%s\",\"uptime_s\":%" PRIu64 ",\"reset_reason\":%d,"
+                     "{\"version\":\"%s\",\"partition\":\"%s\",\"unconfirmed\":%d,\"uptime_s\":%" PRIu64 ",\"reset_reason\":%d,"
                      "\"free_heap\":%" PRIu32 ",\"rssi\":%d,"
                      "\"ble\":{\"connected\":%d,\"encrypted\":%d,\"subscribed\":%d,\"bonds\":%d,\"itvl\":%u,"
                      "\"sent\":%" PRIu32 ",\"failed\":%" PRIu32 "},"
                      "\"usb\":{\"host\":%d,\"attached\":%d,\"touch\":%d,\"vid\":%u,\"pid\":%u,\"kind\":%u,"
                      "\"iface\":%u,\"contacts\":%u,\"reports\":%" PRIu32 ",\"touches\":%" PRIu32 ",\"errors\":%" PRIu32 "}}\n",
-                     esp_app_get_description()->version, run->label, (uint64_t)(esp_timer_get_time() / 1000000),
+                     esp_app_get_description()->version, run->label, running_unconfirmed(), (uint64_t)(esp_timer_get_time() / 1000000),
                      (int)esp_reset_reason(), esp_get_free_heap_size(), ap.rssi,
                      b.connected, b.encrypted, b.subscribed, b.bonds, b.conn_itvl, b.sent, b.send_failed,
                      u.started, u.attached, u.has_touch, u.vid, u.pid, u.kind, u.iface, u.contacts,
@@ -180,10 +188,27 @@ static esp_err_t h_forget(httpd_req_t *r)
     return httpd_resp_sendstr(r, "bonds cleared\n");
 }
 
+static esp_err_t h_confirm(httpd_req_t *r)
+{
+    if (!authorised(r)) {
+        return ESP_OK;
+    }
+    if (running_unconfirmed() && esp_ota_mark_app_valid_cancel_rollback() != ESP_OK) {
+        return httpd_resp_send_500(r);
+    }
+    return httpd_resp_sendstr(r, "confirmed\n");
+}
+
 static esp_err_t h_ota(httpd_req_t *r)
 {
     if (!authorised(r)) {
         return ESP_OK;
+    }
+    // esp_ota_begin refuses while the running image is unconfirmed. Reaching this
+    // point proves it can receive updates, so accept it rather than lock OTA out.
+    if (running_unconfirmed()) {
+        ESP_LOGW(TAG, "confirming running image to allow OTA");
+        esp_ota_mark_app_valid_cancel_rollback();
     }
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     esp_ota_handle_t ota = 0;
@@ -196,16 +221,18 @@ static esp_err_t h_ota(httpd_req_t *r)
     }
     esp_err_t err = esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota);
     size_t left = r->content_len;
+    int idle = 0;
     ESP_LOGI(TAG, "OTA: %u bytes to %s", (unsigned)left, part->label);
     while (err == ESP_OK && left > 0) {
         int n = httpd_req_recv(r, buf, left < OTA_CHUNK ? left : OTA_CHUNK);
-        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
-            continue;
+        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++idle < OTA_MAX_IDLE) {
+            continue; // the server is single threaded, so never wait forever
         }
         if (n <= 0) {
             err = ESP_FAIL;
             break;
         }
+        idle = 0;
         err = esp_ota_write(ota, buf, n);
         left -= n;
     }
@@ -246,6 +273,7 @@ static void http_start(void)
         {.uri = "/ota", .method = HTTP_POST, .handler = h_ota},
         {.uri = "/reboot", .method = HTTP_POST, .handler = h_reboot},
         {.uri = "/forget", .method = HTTP_POST, .handler = h_forget},
+        {.uri = "/confirm", .method = HTTP_POST, .handler = h_confirm},
     };
     for (size_t i = 0; i < sizeof routes / sizeof routes[0]; i++) {
         ESP_ERROR_CHECK(httpd_register_uri_handler(srv, &routes[i]));
@@ -281,8 +309,12 @@ void netsvc_start(void)
         if (err == ESP_OK) {
             err = nvs_get_str(h, "token", s_token, &tok_len);
         }
-        if (err == ESP_OK && nvs_get_str(h, "pass", pass, &pass_len) != ESP_OK) {
-            pass[0] = 0; // open network
+        if (err == ESP_OK) {
+            err = nvs_get_str(h, "pass", pass, &pass_len);
+            if (err == ESP_ERR_NVS_NOT_FOUND) {
+                pass[0] = 0; // open network
+                err = ESP_OK;
+            }
         }
         nvs_close(h);
     }

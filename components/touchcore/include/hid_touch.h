@@ -41,7 +41,9 @@ typedef struct {
 
 typedef struct {
     bool tracking;
+    bool seen;          // tracked contact appeared in the current frame
     int32_t active_id;
+    int32_t frame_left; // contacts still expected in a hybrid-mode frame
 } ht_state_t;
 
 typedef struct {

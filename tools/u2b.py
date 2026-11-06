@@ -112,6 +112,7 @@ def main():
     p.set_defaults(fn=cmd_swipe)
     sub.add_parser("reboot").set_defaults(fn=cmd_post)
     sub.add_parser("forget", help="clear all Bluetooth bonds").set_defaults(fn=cmd_post)
+    sub.add_parser("confirm", help="accept the running image, cancelling rollback").set_defaults(fn=cmd_post)
     args = parser.parse_args()
     try:
         args.fn(args)

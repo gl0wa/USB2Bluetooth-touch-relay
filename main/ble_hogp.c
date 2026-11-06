@@ -314,7 +314,9 @@ bool ble_hogp_ready(void)
 
 bool ble_hogp_send_touch(bool down, uint16_t x, uint16_t y)
 {
-    if (!ble_hogp_ready()) {
+    // Read the handle once: if the link drops here, the send fails with ENOTCONN.
+    uint16_t conn = s_conn;
+    if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_subscribed) {
         return false;
     }
     // The report ID lives in the Report Reference descriptor, not the payload.
@@ -322,7 +324,7 @@ bool ble_hogp_send_touch(bool down, uint16_t x, uint16_t y)
         down ? 0x03 : 0x00, 0x00, x & 0xFF, x >> 8, y & 0xFF, y >> 8, down ? 1 : 0,
     };
     struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
-    if (!om || ble_gatts_notify_custom(s_conn, s_touch_handle, om) != 0) {
+    if (!om || ble_gatts_notify_custom(conn, s_touch_handle, om) != 0) {
         s_failed++;
         return false;
     }

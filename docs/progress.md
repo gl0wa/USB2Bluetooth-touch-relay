@@ -9,6 +9,9 @@
 - Through uhid, the Shield treats a Contact ID digitizer as a true touchscreen
   (`docs/android-compat.md`).
 
+- Independent pre-flash code review completed; verified defects fixed. Plain HTTP
+  for the API token remains an accepted, documented limitation for now.
+
 ## Not yet run on hardware
 
 All firmware: USB host, BLE HID, Wi-Fi, OTA, rollback, mode detection, LED.

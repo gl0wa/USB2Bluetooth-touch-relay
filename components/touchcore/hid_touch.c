@@ -1,4 +1,5 @@
 #include "hid_touch.h"
+#include <stdlib.h>
 #include <string.h>
 
 #define PAGE_DESKTOP 0x01u
@@ -144,7 +145,8 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
     uint32_t umin = 0, umax = 0;
     bool have_range = false;
 
-    cand_t cands[MAX_CANDIDATES];
+    // Heap, not stack: this workspace is several KB and USB tasks have small stacks.
+    cand_t *cands = malloc(sizeof(cand_t) * MAX_CANDIDATES);
     size_t n_cands = 0;
     offset_t offs[MAX_REPORT_IDS];
     size_t n_offs = 0;
@@ -152,6 +154,11 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
     size_t depth = 0;
     uint8_t finger_gen = 0, app = 0;
     uint32_t app_usage = 0;
+
+    memset(out, 0, sizeof(*out));
+    if (!cands) {
+        return false;
+    }
 
     for (size_t i = 0; i < len;) {
         uint8_t b = d[i++];
@@ -297,7 +304,7 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
         }
     }
     if (!best) {
-        memset(out, 0, sizeof(*out));
+        free(cands);
         return false;
     }
     *out = best->l;
@@ -309,6 +316,7 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
             out->c[w++] = *k;
         }
     }
+    free(cands);
     return true;
 }
 
@@ -358,9 +366,26 @@ bool ht_decode(const ht_layout_t *l, const uint8_t *report, size_t len, ht_state
         len--;
     }
 
+    // Hybrid mode splits one frame over several reports: the first carries the
+    // contact count, and continuation reports carry zero.
+    int32_t count = 0;
+    bool has_count = read_field(&l->count, report, len, &count);
+    int slots = l->contacts;
+    bool frame_done = true;
+    if (has_count) {
+        if (count > 0 || st->frame_left <= 0) {
+            st->frame_left = count;
+            st->seen = false;
+        } else if (st->frame_left < slots) {
+            slots = st->frame_left; // the rest of this report is unused padding
+        }
+        st->frame_left -= st->frame_left < l->contacts ? st->frame_left : l->contacts;
+        frame_done = st->frame_left == 0;
+    }
+
     int found = -1;
     int32_t found_id = 0, tip = 0;
-    for (int s = 0; s < l->contacts; s++) {
+    for (int s = 0; s < slots; s++) {
         const ht_contact_t *k = &l->c[s];
         int32_t id = s, t = 0;
         if (k->id.present) {
@@ -377,11 +402,8 @@ bool ht_decode(const ht_layout_t *l, const uint8_t *report, size_t len, ht_state
         }
     }
     if (found < 0) {
-        // A tracked contact missing from the report only means it ended when
-        // nothing else is being reported; hybrid mode splits contacts across reports.
-        int32_t count = 0;
-        bool has_count = read_field(&l->count, report, len, &count);
-        if (st->tracking && has_count && count == 0) {
+        // The tracked contact only ended if a whole frame passed without it.
+        if (st->tracking && has_count && frame_done && !st->seen) {
             st->tracking = false;
             out->down = false;
             out->x = out->y = 0;
@@ -389,6 +411,7 @@ bool ht_decode(const ht_layout_t *l, const uint8_t *report, size_t len, ht_state
         }
         return false;
     }
+    st->seen = true;
 
     int32_t x, y;
     if (!read_field(&l->c[found].x, report, len, &x) || !read_field(&l->c[found].y, report, len, &y)) {

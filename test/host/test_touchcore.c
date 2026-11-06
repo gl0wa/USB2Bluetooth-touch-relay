@@ -97,6 +97,28 @@ static void test_two_fingers(void)
     CHECK(!t.down && !st.tracking);
 }
 
+static void test_hybrid(void)
+{
+    ht_layout_t l;
+    CHECK(ht_parse_descriptor(mt_desc, sizeof mt_desc, &l));
+    ht_state_t st = {0};
+    ht_touch_t t;
+
+    // One contact per report: tracked contact 1, then the frame's second contact.
+    uint8_t a[] = {1, 0x03, 1, 0x10, 0, 0x20, 0, 2};
+    uint8_t b[] = {1, 0x03, 2, 0x30, 0, 0x40, 0, 0};
+    CHECK(ht_decode(&l, a, sizeof a, &st, &t) && t.down);
+    CHECK(!ht_decode(&l, b, sizeof b, &st, &t)); // continuation is not a release
+    CHECK(st.tracking && st.active_id == 1);
+    CHECK(ht_decode(&l, a, sizeof a, &st, &t) && t.down);
+
+    // A complete frame without the tracked contact ends it.
+    uint8_t other[] = {1, 0x03, 2, 0x30, 0, 0x40, 0, 1};
+    CHECK(!ht_decode(&l, b, sizeof b, &st, &t));
+    CHECK(ht_decode(&l, other, sizeof other, &st, &t) && !t.down);
+    CHECK(!st.tracking);
+}
+
 static void test_mice(void)
 {
     ht_layout_t l;
@@ -168,6 +190,7 @@ int main(void)
 {
     test_mt();
     test_two_fingers();
+    test_hybrid();
     test_mice();
     test_robustness();
     test_map();
