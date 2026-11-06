@@ -83,6 +83,6 @@
    power cycle.
 4. Long-run stability test.
 5. Set NimBLE logging back to WARNING.
-6. Navigation for Back/Home: edge-swipe gestures plus button fallback are
-   implemented and host-tested; behaviour over BLE and on screen NOT yet verified.
+6. Navigation for Back/Home is not working over BLE yet, pending a test of
+   the single-characteristic Report ID 0 approach.
 7. D-pad mode is planned later, not in this change.

@@ -34,6 +34,16 @@ for Back, up from the BOTTOM edge for Home. Turn them off with
 `python3 tools/u2b.py gestures off` (for example on devices other than
 Android TV). The setting survives reboot and re-provisioning.
 
+If touch misbehaves on a device other than Android TV, try standard HID mode:
+
+```sh
+python3 tools/u2b.py hid-mode standard
+```
+
+This needs a reboot and a re-pair to apply, and it has no Back/Home keys.
+Keep `gestures off` as the simple switch for non-Android hosts; use standard
+mode only if touch itself misbehaves.
+
 ## Connection
 
 Try the simple cable first: monitor touch port to the StampS3 USB-C socket with

@@ -25,12 +25,31 @@ but installing one needs root.
 
 ## Combined touch plus Back/Home keys
 
-The BLE map appends a Consumer Control collection (report 2: bit0 AC Back,
-bit1 AC Home) after the touch collection, with no Feature report. Through
-uhid Android merged both into one device, Sources `0x1103`, touch stayed
-`touchScreen` in direct mode, and `KEY_HOMEPAGE` and `KEY_BACK` reached the
-kernel. Behaviour over BLE and on screen is NOT yet verified. Adding this
-needs one re-pair: Android may cache the old map.
+The BLE report map appends a Consumer Control collection (report 2: bit0 AC
+Back, bit1 AC Home) after the touch collection, with no Feature report. The
+map bytes are unchanged in both HID modes.
+
+Measured over BLE with two Input Report characteristics (HCI capture): Android
+discovered both but read the Report Reference and wrote the CCCD for the first
+(touch) only. The keys characteristic was never subscribed, so
+`ble_hogp_send_keys()` always returned false and Back/Home never reached
+Android. A second Report characteristic does not carry keys on this stack.
+
+Putting the Consumer usages inside the Touch Screen collection was also tested
+through uhid: `hid-multitouch` ignored them. Do not try that again.
+
+Current approach: one Input Report characteristic carries both reports. In
+Android mode (default) its Report Reference declares Report ID 0, so the
+payload carries its own first byte as report ID (touch: `[1, ...]`, keys:
+`[2, bits]`). This relies on memory of AOSP `bta_hh_le_input_rpt_notify`
+prepending a report ID only when it is non-zero; that was not read from source.
+It is non-standard HOGP and NOT yet verified on hardware. Hosts other than
+this Android stack may misparse it, so a standard mode exists
+(`hid-mode standard`): normal report IDs, touch only, no Back/Home keys.
+
+uhid tests exercise the descriptor and the kernel/InputReader path only; they
+do not exercise HOGP GATT setup (service discovery, Report Reference reads,
+CCCD subscribes), so they cannot catch the missing-subscribe failure above.
 
 ## Verified over BLE
 

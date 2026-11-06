@@ -72,13 +72,14 @@ static esp_err_t h_status(httpd_req_t *r)
     char out[768];
     int n = snprintf(out, sizeof out,
                      "{\"version\":\"%s\",\"partition\":\"%s\",\"unconfirmed\":%d,\"uptime_s\":%" PRIu64 ",\"reset_reason\":%d,"
-                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,\"gestures\":%d,"
+                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,\"gestures\":%d,\"standard_hid\":%d,"
                      "\"ble\":{\"connected\":%d,\"encrypted\":%d,\"subscribed\":%d,\"bonds\":%d,\"itvl\":%u,"
                      "\"sent\":%" PRIu32 ",\"failed\":%" PRIu32 ",\"keys\":%" PRIu32 "},"
                      "\"usb\":{\"host\":%d,\"attached\":%d,\"touch\":%d,\"vid\":%u,\"pid\":%u,\"kind\":%u,"
                      "\"iface\":%u,\"contacts\":%u,\"reports\":%" PRIu32 ",\"touches\":%" PRIu32 ",\"errors\":%" PRIu32 "}}\n",
                      esp_app_get_description()->version, run->label, running_unconfirmed(), (uint64_t)(esp_timer_get_time() / 1000000),
                      (int)esp_reset_reason(), esp_get_free_heap_size(), ap.rssi, relay_get_gestures() ? 1 : 0,
+                     b.standard_hid ? 1 : 0,
                      b.connected, b.encrypted, b.subscribed, b.bonds, b.conn_itvl, b.sent, b.send_failed, b.keys_sent,
                      u.started, u.attached, u.has_touch, u.vid, u.pid, u.kind, u.iface, u.contacts,
                      u.reports, u.touches, u.errors);
@@ -200,20 +201,36 @@ static void reboot_later(void *arg)
     esp_restart();
 }
 
-// Persistent edge-gesture switch. Stored in default NVS, namespace "cfg",
-// so re-provisioning (which rewrites devcfg) keeps it. Applies immediately.
+// Persistent switches in default NVS, namespace "cfg", so re-provisioning
+// (which rewrites devcfg) keeps them. Gestures apply immediately; standard_hid
+// only saves and needs a reboot plus re-pair, the running mode is unchanged.
 static esp_err_t h_config(httpd_req_t *r)
 {
     if (!authorised(r)) {
         return ESP_OK;
     }
     int g = query_int(r, "gestures", -1);
-    if (g != 0 && g != 1) {
-        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "gestures must be 0 or 1");
+    int s = query_int(r, "standard_hid", -1);
+    bool g_ok = g == 0 || g == 1;
+    bool s_ok = s == 0 || s == 1;
+    if (!g_ok && !s_ok) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "gestures must be 0 or 1, standard_hid must be 0 or 1");
     }
-    relay_set_gestures(g != 0);
-    char out[16];
-    int n = snprintf(out, sizeof out, "gestures=%d\n", g);
+    if (g_ok) {
+        relay_set_gestures(g != 0);
+    }
+    if (s_ok) {
+        relay_save_standard_hid(s != 0);
+    }
+    char out[96];
+    int n;
+    if (g_ok && s_ok) {
+        n = snprintf(out, sizeof out, "gestures=%d\nstandard_hid=%d, reboot and re-pair to apply\n", g, s);
+    } else if (s_ok) {
+        n = snprintf(out, sizeof out, "standard_hid=%d, reboot and re-pair to apply\n", s);
+    } else {
+        n = snprintf(out, sizeof out, "gestures=%d\n", g);
+    }
     return httpd_resp_send(r, out, n);
 }
 

@@ -33,6 +33,7 @@
 #define KEY_RETRY_MS 200
 #define GESTURE_NVS_NS "cfg"
 #define GESTURE_NVS_KEY "gestures"
+#define STD_HID_NVS_KEY "std_hid"
 
 typedef struct {
     bool is_key; // button Back request; down/x/y ignored
@@ -46,6 +47,7 @@ static touch_map_t s_map;
 static led_strip_handle_t s_led;
 static gesture_t s_gesture;
 static bool s_gestures_enabled = true;
+static bool s_standard_hid;
 
 static void enqueue(touch_evt_t e)
 {
@@ -98,6 +100,36 @@ void relay_set_gestures(bool enabled)
 bool relay_get_gestures(void)
 {
     return s_gestures_enabled;
+}
+
+static bool std_hid_load(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 0;
+    if (nvs_open(GESTURE_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, STD_HID_NVS_KEY, &v) != ESP_OK) {
+            v = 0;
+        }
+        nvs_close(h);
+    }
+    return v != 0;
+}
+
+bool relay_get_standard_hid(void)
+{
+    return s_standard_hid;
+}
+
+// Persists the HID mode only; the running BLE mode stays until a reboot.
+void relay_save_standard_hid(bool standard)
+{
+    nvs_handle_t h;
+    if (nvs_open(GESTURE_NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, STD_HID_NVS_KEY, standard ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "standard_hid %d saved (reboot and re-pair to apply)", standard ? 1 : 0);
 }
 
 // Same send logic and retry semantics as before, shared by live and replayed touches.
@@ -284,12 +316,14 @@ void app_main(void)
 
     touch_map_default(&s_map);
     s_gestures_enabled = gestures_load();
+    s_standard_hid = std_hid_load();
     gesture_cfg_t gc = gesture_default_cfg();
     gc.enabled = s_gestures_enabled;
     gesture_init(&s_gesture, gc);
     s_touch_q = xQueueCreate(64, sizeof(touch_evt_t));
     xTaskCreate(relay_task, "relay", 4096, NULL, 7, NULL); // logs, so needs room for vsnprintf
 
+    ble_hogp_set_standard_hid(s_standard_hid);
     ble_hogp_init();
     netsvc_start();
 
@@ -333,7 +367,7 @@ void app_main(void)
         } else if (!u.has_touch) {
             set_led(blink ? 24 : 0, 0, 0);          // red blink: no touch device
         } else if (!ble_hogp_ready()) {
-            set_led(blink ? 24 : 0, blink ? 12 : 0, 0); // amber blink: waiting for Bluetooth
+            set_led(blink ? 24 : 0, blink ? 24 : 0, 0); // yellow blink: waiting for Bluetooth
         } else {
             set_led(0, 16, 0);                      // green: relaying
         }

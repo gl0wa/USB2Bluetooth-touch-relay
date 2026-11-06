@@ -21,7 +21,7 @@ void ble_store_config_init(void);
 #define PNP_VID 0x1209
 #define PNP_PID 0x0002
 
-enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_KEYS, CHR_BATTERY, CHR_PNP, CHR_MFG };
+enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_BATTERY, CHR_PNP, CHR_MFG };
 
 static const char *TAG = "ble";
 
@@ -68,10 +68,10 @@ static const uint8_t s_report_map[] = {
 };
 
 static uint16_t s_touch_handle;
-static uint16_t s_keys_handle;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static uint8_t s_own_addr_type;
-static volatile bool s_encrypted, s_subscribed, s_keys_subscribed;
+static volatile bool s_encrypted, s_subscribed;
+static volatile bool s_standard_hid;
 static volatile uint16_t s_itvl;
 static volatile uint32_t s_sent, s_failed, s_keys_sent;
 
@@ -97,11 +97,11 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
         return append(ctxt, info, sizeof info);
     }
     case CHR_TOUCH: {
-        static const uint8_t idle[7] = {0};
-        return append(ctxt, idle, sizeof idle);
-    }
-    case CHR_KEYS: {
-        static const uint8_t idle[1] = {0};
+        if (s_standard_hid) {
+            static const uint8_t idle[7] = {0};
+            return append(ctxt, idle, sizeof idle);
+        }
+        static const uint8_t idle[8] = {TOUCH_REPORT_ID, 0, 0, 0, 0, 0, 0, 0};
         return append(ctxt, idle, sizeof idle);
     }
     case CHR_BATTERY: {
@@ -127,8 +127,16 @@ static int report_ref_access(uint16_t conn, uint16_t attr, struct ble_gatt_acces
     return append(ctxt, ref, 2);
 }
 
-static const uint8_t s_touch_ref[] = {TOUCH_REPORT_ID, REPORT_TYPE_INPUT};
-static const uint8_t s_keys_ref[] = {KEYS_REPORT_ID, REPORT_TYPE_INPUT};
+// Android mode declares Report ID 0 so the single Input Report characteristic
+// carries both reports with their own first byte as report ID. Standard mode
+// declares Report ID 1. Set once before init and latched for the whole run.
+static uint8_t s_touch_ref[2] = {0, REPORT_TYPE_INPUT};
+
+void ble_hogp_set_standard_hid(bool standard)
+{
+    s_standard_hid = standard;
+    s_touch_ref[0] = standard ? TOUCH_REPORT_ID : 0;
+}
 
 #define CHR(u16, id, fl) {.uuid = BLE_UUID16_DECLARE(u16), .access_cb = chr_access, .arg = (void *)(intptr_t)(id), .flags = (fl)}
 #define READ_ENC (BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC)
@@ -167,11 +175,6 @@ static const struct ble_gatt_svc_def s_services[] = {
                 .arg = (void *)(intptr_t)CHR_TOUCH, .flags = READ_ENC | BLE_GATT_CHR_F_NOTIFY,
                 .val_handle = &s_touch_handle, .descriptors = REPORT_REF(s_touch_ref),
             },
-            {
-                .uuid = BLE_UUID16_DECLARE(0x2A4D), .access_cb = chr_access,
-                .arg = (void *)(intptr_t)CHR_KEYS, .flags = READ_ENC | BLE_GATT_CHR_F_NOTIFY,
-                .val_handle = &s_keys_handle, .descriptors = REPORT_REF(s_keys_ref),
-            },
             {0},
         },
     },
@@ -193,7 +196,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "disconnect reason=0x%x", ev->disconnect.reason);
         s_conn = BLE_HS_CONN_HANDLE_NONE;
-        s_encrypted = s_subscribed = s_keys_subscribed = false;
+        s_encrypted = s_subscribed = false;
         advertise();
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
@@ -225,9 +228,6 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         if (ev->subscribe.attr_handle == s_touch_handle) {
             s_subscribed = ev->subscribe.cur_notify;
             ESP_LOGI(TAG, "touch notifications %s (reason %d)", s_subscribed ? "on" : "off", ev->subscribe.reason);
-        } else if (ev->subscribe.attr_handle == s_keys_handle) {
-            s_keys_subscribed = ev->subscribe.cur_notify;
-            ESP_LOGI(TAG, "keys notifications %s (reason %d)", s_keys_subscribed ? "on" : "off", ev->subscribe.reason);
         }
         break;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
@@ -335,9 +335,24 @@ bool ble_hogp_send_touch(bool down, uint16_t x, uint16_t y)
     if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_subscribed) {
         return false;
     }
-    // The report ID lives in the Report Reference descriptor, not the payload.
-    const uint8_t r[7] = {
-        down ? 0x03 : 0x00, 0x00, x & 0xFF, x >> 8, y & 0xFF, y >> 8, down ? 1 : 0,
+    if (s_standard_hid) {
+        // Standard HOGP: the report ID lives in the Report Reference
+        // descriptor, not the payload.
+        const uint8_t r[7] = {
+            down ? 0x03 : 0x00, 0x00, x & 0xFF, x >> 8, y & 0xFF, y >> 8, down ? 1 : 0,
+        };
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
+        if (!om || ble_gatts_notify_custom(conn, s_touch_handle, om) != 0) {
+            s_failed++;
+            return false;
+        }
+        s_sent++;
+        return true;
+    }
+    // Android mode: the Report Reference declares ID 0, so the payload carries
+    // its own first byte as report ID.
+    const uint8_t r[8] = {
+        TOUCH_REPORT_ID, down ? 0x03 : 0x00, 0x00, x & 0xFF, x >> 8, y & 0xFF, y >> 8, down ? 1 : 0,
     };
     struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
     if (!om || ble_gatts_notify_custom(conn, s_touch_handle, om) != 0) {
@@ -348,15 +363,24 @@ bool ble_hogp_send_touch(bool down, uint16_t x, uint16_t y)
     return true;
 }
 
+// One Input Report characteristic carries both touch (report 1) and keys
+// (report 2): the Android TV stack only read the Report Reference and
+// subscribed to the CCCD of the first Input Report characteristic, so a second
+// characteristic never delivered keys. See docs/android-compat.md. In standard
+// mode keys are unavailable and this returns false.
 bool ble_hogp_send_keys(uint8_t bits)
 {
-    uint16_t conn = s_conn;
-    if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_keys_subscribed) {
+    if (s_standard_hid) {
         return false;
     }
-    const uint8_t r[1] = {(uint8_t)(bits & 0x03)};
+    // Read the handle once: if the link drops here, the send fails with ENOTCONN.
+    uint16_t conn = s_conn;
+    if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_subscribed) {
+        return false;
+    }
+    const uint8_t r[2] = {KEYS_REPORT_ID, (uint8_t)(bits & 0x03)};
     struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
-    if (!om || ble_gatts_notify_custom(conn, s_keys_handle, om) != 0) {
+    if (!om || ble_gatts_notify_custom(conn, s_touch_handle, om) != 0) {
         return false;
     }
     s_keys_sent++;
@@ -371,6 +395,7 @@ void ble_hogp_get_status(ble_hogp_status_t *out)
         .connected = s_conn != BLE_HS_CONN_HANDLE_NONE,
         .encrypted = s_encrypted,
         .subscribed = s_subscribed,
+        .standard_hid = s_standard_hid,
         .bonds = bonds,
         .conn_itvl = s_itvl,
         .sent = s_sent,

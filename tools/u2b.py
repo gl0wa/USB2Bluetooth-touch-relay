@@ -101,6 +101,12 @@ def cmd_gestures(args):
     print(call(f"/config?gestures={1 if args.state == 'on' else 0}", "POST", b"").read().decode(), end="")
 
 
+def cmd_hid_mode(args):
+    v = 1 if args.mode == "standard" else 0
+    # POST: call() retries GETs only, so this sends exactly one request.
+    print(call(f"/config?standard_hid={v}", "POST", b"").read().decode(), end="")
+
+
 def cmd_key(args):
     print(call(f"/key?k={args.which}", "POST", b"").read().decode(), end="")
 
@@ -140,6 +146,9 @@ def main():
     p = sub.add_parser("gestures", help="edge-swipe Back/Home on or off, persists across reboot")
     p.add_argument("state", choices=("on", "off"))
     p.set_defaults(fn=cmd_gestures)
+    p = sub.add_parser("hid-mode", help="HID report mode, persists; needs reboot and re-pair")
+    p.add_argument("mode", choices=("android", "standard"))
+    p.set_defaults(fn=cmd_hid_mode)
     p = sub.add_parser("key", help="send a Bluetooth Back/Home key directly, bypasses the switch")
     p.add_argument("which", choices=("back", "home"))
     p.set_defaults(fn=cmd_key)

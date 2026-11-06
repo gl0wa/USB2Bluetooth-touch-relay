@@ -7,6 +7,7 @@ typedef struct {
     bool connected;
     bool encrypted;
     bool subscribed;
+    bool standard_hid;
     int bonds;
     uint16_t conn_itvl; // units of 1.25 ms
     uint32_t sent;
@@ -14,6 +15,10 @@ typedef struct {
     uint32_t keys_sent;
 } ble_hogp_status_t;
 
+// Latches the HID mode for the whole run. Call before ble_hogp_init.
+// false (default): Android mode, one Input Report characteristic.
+// true: standard mode, normal HOGP report IDs, keys unavailable.
+void ble_hogp_set_standard_hid(bool standard);
 void ble_hogp_init(void);
 
 // Returns false if the report could not be queued; the caller may retry.
