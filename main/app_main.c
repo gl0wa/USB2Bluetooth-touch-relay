@@ -137,6 +137,23 @@ static void send_key_bits(uint8_t bits, const char *why)
     ESP_LOGI(TAG, "%s", why);
 }
 
+static void send_gesture_out(const gesture_out_t *out, bool *sent_down)
+{
+    for (uint8_t i = 0; i < out->n; i++) {
+        const gesture_ev_t *ev = &out->ev[i];
+        if (ev->is_key) {
+            // send_key_bits does press and release, so act on the press event only.
+            if (ev->down) {
+                send_key_bits(ev->key, ev->key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
+            }
+        } else if (ble_hogp_ready()) {
+            send_touch_evt(ev->down, ev->x, ev->y, sent_down);
+        } else {
+            *sent_down = false; // the host drops the contact with the connection
+        }
+    }
+}
+
 // The engine runs here only, the single consumer, so it needs no lock.
 // Move coalescing stays but only while the engine is passing the contact
 // through: a held edge press must keep every sample or it could miss the
@@ -150,18 +167,7 @@ static void relay_task(void *arg)
         if (xQueueReceive(s_touch_q, &e, pdMS_TO_TICKS(20)) != pdTRUE) {
             gesture_out_t out;
             gesture_tick(&s_gesture, (uint32_t)(esp_timer_get_time() / 1000), &out);
-            for (uint8_t i = 0; i < out.n; i++) {
-                if (out.ev[i].is_key) {
-                    send_key_bits(out.ev[i].key,
-                                  out.ev[i].key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
-                } else {
-                    if (!ble_hogp_ready()) {
-                        sent_down = false;
-                        continue;
-                    }
-                    send_touch_evt(out.ev[i].down, out.ev[i].x, out.ev[i].y, &sent_down);
-                }
-            }
+            send_gesture_out(&out, &sent_down);
             continue;
         }
         if (e.is_key) {
@@ -176,18 +182,7 @@ static void relay_task(void *arg)
         }
         gesture_out_t out;
         gesture_feed(&s_gesture, e.down, e.x, e.y, (uint32_t)(esp_timer_get_time() / 1000), &out);
-        for (uint8_t i = 0; i < out.n; i++) {
-            if (out.ev[i].is_key) {
-                send_key_bits(out.ev[i].key,
-                              out.ev[i].key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
-            } else {
-                if (!ble_hogp_ready()) {
-                    sent_down = false; // the host drops the contact with the connection
-                    continue;
-                }
-                send_touch_evt(out.ev[i].down, out.ev[i].x, out.ev[i].y, &sent_down);
-            }
-        }
+        send_gesture_out(&out, &sent_down);
     }
 }
 
