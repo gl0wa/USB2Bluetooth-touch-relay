@@ -45,20 +45,18 @@
   BLE reports sent, 0 failed, 0 USB errors. The image auto-confirmed under the
   OTA rule.
 
+- Back and Home work on screen over BLE through edge swipes and the StampS3 button,
+  confirmed by the user: 46 key reports sent, 0 failed, alongside 1723 touch reports.
+- After a reconnect the input device returns in about 1.2 s, down from 6-7 s.
+
 ## Unknown
 
 - Exact StampS3 board revision (the chip and flash are confirmed).
 - Single touch only: the panel sends touches on its absolute-mouse interface
   (report `0x07`). Multi-touch through the Touch Screen interface is untested.
 - Android TV is built for D-pad navigation. Some controls do not respond to
-  touch, for example the launcher's top tabs. There is no on-screen Back or
-  Home, so touch alone cannot leave an app or Settings; the remote is still
-  needed.
-- After a reconnect Android takes about 6 s to bring back the input device.
-  The Feature report was removed to fix this, but that is only verified through
-  uhid: re-pairing has not been done since, so whether the delay is gone over
-  BLE is unknown. Android may cache the old map, so forget and re-pair before
-  measuring.
+  touch, for example the launcher's top tabs. Back and Home come from edge swipes;
+  the top tabs still need the remote until D-pad mode exists.
 - Pairing failed while the Shield was streaming audio to a speaker in another
   room, and worked once it was disconnected. Which factor mattered is unknown.
   Audio together with touch is untested.
@@ -77,12 +75,8 @@
 
 ## Next
 
-1. Forget and re-pair, then measure the reconnect delay over BLE.
+1. D-pad mode, for controls that ignore touch.
 2. Test pairing and touch with the speaker nearby.
 3. Cold-start and USB unplug/replug recovery tests, including after a monitor
    power cycle.
 4. Long-run stability test.
-5. Set NimBLE logging back to WARNING.
-6. Navigation for Back/Home is not working over BLE yet, pending a test of
-   the single-characteristic Report ID 0 approach.
-7. D-pad mode is planned later, not in this change.

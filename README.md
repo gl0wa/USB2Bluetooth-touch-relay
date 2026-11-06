@@ -14,8 +14,8 @@ Touchscreen --USB HID--> StampS3 --BLE HID (HOGP)--> Android TV
 **Status:** works for single touch end to end: USB touch panel -> StampS3 ->
 BLE -> Android, with no app on Android. See [docs/progress.md](docs/progress.md)
 for what has actually been verified, and [docs/android-compat.md](docs/android-compat.md)
-for limitations (single touch only, some Android TV UI elements ignore touch,
-no on-screen Back/Home).
+for limitations (single touch only, some Android TV UI elements ignore touch).
+Edge swipes provide Back and Home.
 
 ## What you need
 

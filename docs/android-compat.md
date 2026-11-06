@@ -42,9 +42,10 @@ Current approach: one Input Report characteristic carries both reports. In
 Android mode (default) its Report Reference declares Report ID 0, so the
 payload carries its own first byte as report ID (touch: `[1, ...]`, keys:
 `[2, bits]`). This relies on memory of AOSP `bta_hh_le_input_rpt_notify`
-prepending a report ID only when it is non-zero; that was not read from source.
-It is non-standard HOGP and NOT yet verified on hardware. Hosts other than
-this Android stack may misparse it, so a standard mode exists
+prepending a report ID only when it is non-zero; that was not read from source,
+but the behaviour is confirmed on hardware: on the Shield, Back and Home work over
+BLE and touch is unaffected. It is non-standard HOGP. Hosts other than this Android
+stack may misparse it, so a standard mode exists
 (`hid-mode standard`): normal report IDs, touch only, no Back/Home keys.
 
 uhid tests exercise the descriptor and the kernel/InputReader path only; they
@@ -64,9 +65,9 @@ with the bond kept, and touch still worked.
 After every Bluetooth reconnect the input device took about 6 s to appear. The
 likely cause is the kernel sending GET_REPORT for Contact Count Maximum and
 timing out; that is not proven. The fix is a descriptor without the Feature
-report, as above. That descriptor is verified through uhid only, NOT yet over
-BLE: the uhid test with no Feature report appeared in under 1 s and was still
-classified `touchScreen` in direct mode.
+report, as above. Measured over BLE after a fresh pairing, the input device now
+returns about 1.2 s after being removed, down from 6-7 s, and is still classified
+`touchScreen` in direct mode.
 
 ## Touch behaviour in Android TV UI
 
@@ -81,10 +82,7 @@ remote is still needed.
 
 ## Open questions
 
-- Back/Home edge-swipe gestures and the button fallback are implemented in
-  firmware, verified through uhid only. Behaviour over BLE and on screen is
-  NOT yet verified.
-- D-pad mode is planned later, not in this change.
+- Whether the Report ID 0 approach works on other Android devices.
 
 ## Pairing investigation
 
