@@ -3,6 +3,7 @@
 #include <string.h>
 #include "hid_touch.h"
 #include "touch_map.h"
+#include "panel_descriptors.h"
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
@@ -119,6 +120,35 @@ static void test_hybrid(void)
     CHECK(!st.tracking);
 }
 
+// Layout of the real panel: report 0x0D, ten 5-byte contacts, scan time, count.
+static void test_real_panel(void)
+{
+    ht_layout_t l;
+    CHECK(ht_parse_descriptor(panel_touch_desc, sizeof panel_touch_desc, &l));
+    CHECK(l.kind == HT_KIND_TOUCHSCREEN && l.report_id == 0x0D && l.contacts == 10);
+    CHECK(l.c[0].tip.bit_off == 0 && l.c[0].id.bit_off == 4 && l.c[0].id.bits == 4);
+    CHECK(l.c[0].x.bit_off == 8 && l.c[0].y.bit_off == 24 && l.c[1].tip.bit_off == 40);
+    CHECK(l.c[0].x.lmax == 0x3FFF && l.c[0].y.lmax == 0x257F);
+    CHECK(l.count.present && l.count.bit_off == 416 && l.count.bits == 8);
+
+    uint8_t r[54] = {0x0D};
+    r[1] = 0x01 | (2 << 4); // tip, contact 2
+    r[2] = 0xFF; r[3] = 0x3F;
+    r[4] = 0xBF; r[5] = 0x12;
+    r[53] = 1;
+    ht_state_t st = {0};
+    ht_touch_t t;
+    CHECK(ht_decode(&l, r, sizeof r, &st, &t));
+    CHECK(t.down && t.x == 32767 && t.y == 0x12BF * 32767 / 0x257F && st.active_id == 2);
+    r[1] = 2 << 4; // lift
+    CHECK(ht_decode(&l, r, sizeof r, &st, &t));
+    CHECK(!t.down && !st.tracking);
+
+    CHECK(!ht_parse_descriptor(panel_vendor_desc, sizeof panel_vendor_desc, &l));
+    CHECK(ht_parse_descriptor(panel_mouse_desc, sizeof panel_mouse_desc, &l));
+    CHECK(l.kind == HT_KIND_ABS_MOUSE && l.report_id == 7);
+}
+
 static void test_mice(void)
 {
     ht_layout_t l;
@@ -191,6 +221,7 @@ int main(void)
     test_mt();
     test_two_fingers();
     test_hybrid();
+    test_real_panel();
     test_mice();
     test_robustness();
     test_map();

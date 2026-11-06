@@ -35,3 +35,7 @@ python3 tools/u2b.py status
 ```
 
 Read [docs/hardware.md](docs/hardware.md) before connecting anything to the 5V pin.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

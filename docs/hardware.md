@@ -39,9 +39,24 @@ Consequences:
 
 ## Monitor
 
-Identity and USB characteristics are **not yet verified**. Unknown: VID/PID, HID
-descriptor, whether the touch controller sits behind a hub, and how the touch
-port behaves on VBUS and CC. Inspect it from the Mac first (`docs/development.md`).
+Measured from a Mac over USB-C, with touch confirmed working and video coming from
+HDMI at the same time:
+
+| Item | Finding |
+| --- | --- |
+| Topology | Internal hub `1a40:0801` (USB 2.0) with the touch controller behind it |
+| Touch controller | `27c0:0859`, "TouchScreen", WCH (`wch.cn`), USB 1.1 full speed |
+| Interface 0 | Touch Screen, report `0x0D`, 10 contacts, X 0..16383, Y 0..9599, 54-byte reports |
+| Interface 1 | Vendor-defined, reports `0x50`/`0x51` |
+| Interface 2 | Absolute mouse, report `0x07` |
+| USB-C | Mac port shows a DisplayPort pin assignment and HPD, so the monitor has a USB-PD controller |
+
+Full speed suits the ESP32-S3, which cannot do high speed. The firmware needs USB host
+hub support (`CONFIG_USB_HOST_HUBS_SUPPORTED`), which ESP-IDF marks as experimental.
+Full descriptors are in `test/host/panel_descriptors.h`.
+
+Still unknown: whether the port sources VBUS to a sink, and whether the hub and touch
+controller run without VBUS from the host. The monitor is externally powered.
 
 ## Connection options
 
