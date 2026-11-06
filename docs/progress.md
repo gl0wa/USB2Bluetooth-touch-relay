@@ -77,6 +77,18 @@
   cable with the monitor on external power, but VBUS was not measured with a
   meter and cold-start behaviour is untested.
 
+## Untested (new in this change, not run on hardware)
+
+- User build (`CONFIG_U2B_NETWORK=n`, `mise run build-release`): both images build
+  locally and the user ELF has no `httpd_*`/`mdns_*`/`netsvc_*`/`esp_wifi_*` symbols
+  (only BT coexistence tables mention "wifi"), but it has not been flashed or run.
+- Serial settings (`status`, `gestures on/off`, `hid android/standard`, `forget`,
+  `reboot` with `U2B ` JSON lines): compiles in both builds, not exercised over USB.
+- Web install page (`web/`) and GitHub Pages flashing: not tried on hardware; needs
+  desktop Chrome or Edge.
+- Release workflow (tag → Pages + GitHub release): YAML parses and the local build
+  and merge commands pass, but the workflow itself has not run.
+
 ## Next
 
 1. Test pairing and touch with the speaker nearby.

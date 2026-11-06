@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Usb2BT Touch — install and settings</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</head>
+<body>
+<main>
+<h1>Usb2BT Touch</h1>
+<p>
+Make a USB touchscreen work wirelessly with an Android TV that has no free USB port.
+<a href="https://github.com/gl0wa/USB2Bluetooth-touch-relay">Repository</a> ·
+<a href="https://github.com/gl0wa/USB2Bluetooth-touch-relay/blob/main/docs/user-guide.md">User guide</a>
+</p>
+<p class="note"><strong>Tested combination:</strong> only one monitor and one Android TV device have been
+tested so far (see the repository). Other screens and hosts may behave differently.</p>
+
+<h2>Install</h2>
+<p class="note">Flashing needs <strong>desktop Chrome or Edge</strong> (Web Serial). It does not work
+from a phone browser, Firefox or Safari.</p>
+<div id="serial-support"></div>
+<ol>
+<li>Unplug the StampS3 from the monitor (if connected there).</li>
+<li>Connect the StampS3 to the computer with a <strong>data</strong> USB-C cable.</li>
+<li>Click <strong>Install</strong> and pick the serial port. The user build has no Wi-Fi;
+erasing on install also removes the Bluetooth pairing, so re-pair afterwards.</li>
+<li>If the port does not appear or flashing fails: unplug, <strong>hold the button while
+plugging in</strong>, then retry (ROM download mode; bad firmware cannot disable it).</li>
+<li>Move the cable to the monitor's touch port, then pair from the Android TV:
+Settings → Remotes &amp; Accessories → Add accessory → <strong>“Usb2BT Touch”</strong>.</li>
+</ol>
+<p><esp-web-install-button manifest="manifest.json"></esp-web-install-button></p>
+<p class="note">Install erases the device (<code>new_install_prompt_erase</code> in the manifest),
+which clears Wi-Fi-era leftovers and the Bluetooth bond. Pair again after flashing.</p>
+
+<h2>Settings (USB serial)</h2>
+<p>Plug the StampS3 into a computer (maintenance mode, blue LED), then:</p>
+<p>
+<button id="connect" type="button">Connect</button>
+<button id="disconnect" type="button" disabled>Disconnect</button>
+<button id="refresh" type="button" disabled>Read status</button>
+</p>
+<p id="conn-state">Not connected.</p>
+<div id="settings" hidden>
+<p>Version: <span id="version">–</span> · Build: <span id="build">–</span> ·
+Bonds: <span id="bonds">–</span> <span id="reboot-flag"></span></p>
+<p>
+Gestures (edge Back/Home, D-pad mode): <span id="gestures-state">–</span>
+<button id="gestures-on" type="button">On</button>
+<button id="gestures-off" type="button">Off</button>
+</p>
+<p>
+Bluetooth mode: <span id="hid-state">–</span><br>
+<label><input type="radio" name="hid" value="android"> Android (default)</label><br>
+<label><input type="radio" name="hid" value="standard"> Standard</label>
+<button id="hid-apply" type="button">Apply</button>
+</p>
+<p id="hid-hint"></p>
+<p>
+<button id="forget" type="button">Forget pairings</button>
+<button id="reboot" type="button">Reboot</button>
+</p>
+</div>
+
+<h3>What each option means</h3>
+<ul>
+<li><strong>Gestures on (default):</strong> for Android TV and other screens with no on-screen
+Back or Home. Swipe in from the left edge for Back, up from the bottom edge for Home; swipe
+down from the top edge toggles D-pad mode for controls that ignore touch.</li>
+<li><strong>Gestures off:</strong> when the target has its own navigation, or when touches at
+the screen edges must respond with no delay at all (kiosk, drawing app). Also disables D-pad
+mode and the button's Back.</li>
+<li><strong>Bluetooth mode, Android (default):</strong> needed for Back, Home and D-pad.
+Uses a non-standard report format verified only on one Android TV device.</li>
+<li><strong>Bluetooth mode, Standard:</strong> try on devices that are not Android, or if touch
+misbehaves after pairing (Windows, Linux, iPad). Touch only, no navigation keys. Needs a
+reboot and re-pair. No device other than the tested one has been tried, so these are
+expectations, not tested results.</li>
+<li><strong>Forget pairings:</strong> moving the gateway to another TV, or when it will not
+reconnect. Also remove the device on the Android side.</li>
+<li><strong>Reboot:</strong> applies a Bluetooth-mode change (re-pair too).</li>
+</ul>
+
+<h3>Log</h3>
+<p class="note">Lines starting with <code>U2B</code> are settings responses; the rest is firmware log output.</p>
+<pre id="log" aria-live="polite"></pre>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

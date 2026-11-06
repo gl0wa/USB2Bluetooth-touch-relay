@@ -15,6 +15,11 @@ bool relay_get_dpad(void);
 // Persistent HID mode (default NVS, namespace "cfg", key "std_hid").
 // Latched at boot before BLE init; saving needs a reboot and re-pair.
 bool relay_get_standard_hid(void);
+// Saved HID mode from NVS; may differ from the running mode until a reboot.
+bool relay_get_standard_hid_saved(void);
+// Saved gestures switch from NVS; the effective value (relay_get_gestures)
+// is forced off while standard HID is running.
+bool relay_get_gestures_saved(void);
 void relay_save_standard_hid(bool standard);
 // Short button press asking for Back. Consumed by relay_task, obeys the switch.
 void relay_request_back(void);

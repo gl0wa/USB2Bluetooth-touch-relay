@@ -3,9 +3,11 @@
 #include "driver/gpio.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_app_desc.h"
+#ifdef CONFIG_U2B_NETWORK
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_ota_ops.h"
+#endif
+#include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -15,18 +17,23 @@
 #include "hid_touch.h"
 #include "led_strip.h"
 #include "logring.h"
+#ifdef CONFIG_U2B_NETWORK
 #include "netsvc.h"
+#endif
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "relay.h"
+#include "serial_cfg.h"
 #include "touch_map.h"
 #include "usb_touch.h"
 
 #define PIN_BUTTON GPIO_NUM_0
 #define PIN_LED GPIO_NUM_21
 #define PC_DETECT_MS 1500       // time allowed for a PC to show up on USB after reset
+#ifdef CONFIG_U2B_NETWORK
 #define HEALTHY_S 30            // continuous Wi-Fi, then touch device, needed to confirm an image
 #define ROLLBACK_AFTER_S 180    // give up on an unconfirmed image if Wi-Fi never stabilises
+#endif
 #define FORGET_HOLD_MS 5000
 #define PRESS_RETRY_MS 200
 #define BUTTON_SHORT_MS 1000
@@ -131,6 +138,16 @@ static bool std_hid_load(void)
 bool relay_get_standard_hid(void)
 {
     return s_standard_hid;
+}
+
+bool relay_get_standard_hid_saved(void)
+{
+    return std_hid_load();
+}
+
+bool relay_get_gestures_saved(void)
+{
+    return s_gestures_enabled;
 }
 
 // Persists the HID mode only; the running BLE mode stays until a reboot.
@@ -307,7 +324,9 @@ static bool pc_attached(void)
 // An image is confirmed only once it has run the path most likely to crash it:
 // stable Wi-Fi, then a touch device attached in USB host mode. Until then any reset
 // rolls back. Without a touch device it stays unconfirmed but keeps running, and
-// `POST /confirm` or the next OTA upload accepts it.
+// `POST /confirm` or the next OTA upload accepts it. Development build only;
+// the user build has no networking and no timed rollback.
+#ifdef CONFIG_U2B_NETWORK
 static void check_rollback(bool *pending)
 {
     static int64_t wifi_since, touch_since;
@@ -344,6 +363,7 @@ static void check_rollback(bool *pending)
         }
     }
 }
+#endif
 
 void app_main(void)
 {
@@ -356,18 +376,22 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+#ifdef CONFIG_U2B_NETWORK
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+#endif
 
     gpio_config_t btn = {.pin_bit_mask = 1ULL << PIN_BUTTON, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
     gpio_config(&btn);
     led_init();
     set_led(16, 16, 16);
 
+#ifdef CONFIG_U2B_NETWORK
     bool pending = false;
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK) {
         pending = state == ESP_OTA_IMG_PENDING_VERIFY;
     }
+#endif
 
     touch_map_default(&s_map);
     s_gestures_enabled = gestures_load();
@@ -383,11 +407,14 @@ void app_main(void)
 
     ble_hogp_set_standard_hid(s_standard_hid);
     ble_hogp_init();
+#ifdef CONFIG_U2B_NETWORK
     netsvc_start();
+#endif
 
     bool maintenance = pc_attached();
     if (maintenance) {
         ESP_LOGW(TAG, "PC detected: maintenance mode, USB host disabled");
+        serial_cfg_start();
     } else {
         ESP_LOGI(TAG, "no PC: starting USB host, console moves to the network log");
         logring_set_console(false);
@@ -397,9 +424,11 @@ void app_main(void)
     int64_t held_since = 0;
     for (bool blink = false;; blink = !blink) {
         vTaskDelay(pdMS_TO_TICKS(250));
+#ifdef CONFIG_U2B_NETWORK
         if (pending) {
             check_rollback(&pending);
         }
+#endif
 
         if (gpio_get_level(PIN_BUTTON) == 0) {
             int64_t now = esp_timer_get_time();

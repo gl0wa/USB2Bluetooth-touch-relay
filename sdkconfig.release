@@ -1,0 +1,13 @@
+# User build: no networking. Applied after sdkconfig.defaults via
+# SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release", so the partition
+# table (partitions.csv) and CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE stay
+# exactly as in the development build.
+CONFIG_U2B_NETWORK=n
+
+# Less console noise on the serial settings port; warnings and errors still show.
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_LOG_MAXIMUM_EQUALS_DEFAULT=y
+
+# Wi-Fi exclusion is via main/CMakeLists.txt (esp_wifi/esp_netif/esp_event/
+# esp_http_server are not in REQUIRES when U2B_NETWORK is n), not via Kconfig:
+# CONFIG_ESP_WIFI_ENABLED has no prompt and stays y even when unused.

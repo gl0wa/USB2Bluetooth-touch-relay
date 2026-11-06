@@ -10,6 +10,10 @@ IDF_PATH = "{{ env.IDF_PATH | default(value=env.HOME ~ '/esp/esp-idf') }}"
 description = "Build the firmware"
 run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py build'
 
+[tasks.build-release]
+description = "Build the user firmware (no networking) and merge a USB image"
+run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py -B build-release -DSDKCONFIG=build-release/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.release" build && python3 tools/merge_firmware.py --build-dir build-release --output build-release/u2b-touch-merged.bin'
+
 [tasks.flash]
 description = "Flash over USB; usage: mise run flash -- /dev/cu.usbmodemXXXX"
 run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py -p "$1" flash'

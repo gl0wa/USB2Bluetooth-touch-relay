@@ -1,0 +1,16 @@
+{
+  "name": "Usb2BT Touch (user build)",
+  "version": "__VERSION__",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "__MERGED_BIN__",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}

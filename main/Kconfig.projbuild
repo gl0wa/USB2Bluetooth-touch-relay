@@ -1,0 +1,11 @@
+menu "U2B Project Build"
+
+    config U2B_NETWORK
+        bool "Wi-Fi, OTA and HTTP diagnostics (development build)"
+        default y
+        help
+            Development build: Wi-Fi station, OTA upload and the HTTP
+            diagnostics API in main/netsvc.c. Disable for the user build,
+            which has no networking and is installed from the web page.
+
+endmenu

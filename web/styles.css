@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; }
+body { font-family: system-ui, sans-serif; line-height: 1.5; margin: 0; padding: 0 1rem 3rem; }
+main { max-width: 42rem; margin: 0 auto; }
+.note { background: rgba(127, 127, 127, 0.15); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+button { margin: 0.2rem 0.3rem 0.2rem 0; padding: 0.4rem 0.8rem; font-size: 1rem; }
+pre#log { white-space: pre-wrap; word-break: break-word; border: 1px solid #888;
+  border-radius: 0.5rem; padding: 0.5rem; max-height: 20rem; overflow-y: auto;
+  font-size: 0.85rem; }
+esp-web-install-button { display: inline-block; margin: 0.5rem 0; }
