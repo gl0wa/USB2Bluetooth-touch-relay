@@ -14,20 +14,20 @@ void ble_store_config_init(void);
 #define DEVICE_NAME "Usb2BT Touch"
 #define APPEARANCE_DIGITIZER 0x03C5
 #define TOUCH_REPORT_ID 1
-#define FEATURE_REPORT_ID 2
 #define REPORT_TYPE_INPUT 1
-#define REPORT_TYPE_FEATURE 3
 
 // pid.codes test VID/PID. A project-specific PID can replace it before release.
 #define PNP_VID 0x1209
 #define PNP_PID 0x0002
 
-enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_FEATURE, CHR_BATTERY, CHR_PNP, CHR_MFG };
+enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_BATTERY, CHR_PNP, CHR_MFG };
 
 static const char *TAG = "ble";
 
-// Contact ID plus Contact Count Max is what binds Linux hid-multitouch, which
-// sets INPUT_PROP_DIRECT. Without them the Shield maps a digitizer as a pointer.
+// Contact ID is what binds Linux hid-multitouch, which sets INPUT_PROP_DIRECT.
+// Without it the Shield maps a digitizer as a pointer. Do not add a Feature
+// report back: the kernel GET_REPORTs it on every reconnect and the resulting
+// timeout delays the input device by about 6 s.
 // See docs/android-compat.md before changing this.
 static const uint8_t s_report_map[] = {
     0x05, 0x0D,       // Usage Page (Digitizer)
@@ -51,9 +51,6 @@ static const uint8_t s_report_map[] = {
     0x05, 0x0D,       //   Usage Page (Digitizer)
     0x09, 0x54,       //   Usage (Contact Count)
     0x15, 0x00, 0x25, 0x0A, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02,
-    0x85, FEATURE_REPORT_ID,
-    0x09, 0x55,       //   Usage (Contact Count Maximum)
-    0x25, 0x0A, 0x75, 0x08, 0x95, 0x01, 0xB1, 0x02,
     0xC0,             // End Collection
 };
 
@@ -76,7 +73,7 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
     (void)conn;
     (void)attr;
     if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-        return 0; // Control Point and Feature writes carry nothing we act on
+        return 0; // Control Point writes carry nothing we act on
     }
     switch ((int)(intptr_t)arg) {
     case CHR_REPORT_MAP:
@@ -88,10 +85,6 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
     case CHR_TOUCH: {
         static const uint8_t idle[7] = {0};
         return append(ctxt, idle, sizeof idle);
-    }
-    case CHR_FEATURE: {
-        static const uint8_t max_contacts = 1;
-        return append(ctxt, &max_contacts, 1);
     }
     case CHR_BATTERY: {
         static const uint8_t level = 100;
@@ -117,7 +110,6 @@ static int report_ref_access(uint16_t conn, uint16_t attr, struct ble_gatt_acces
 }
 
 static const uint8_t s_touch_ref[] = {TOUCH_REPORT_ID, REPORT_TYPE_INPUT};
-static const uint8_t s_feature_ref[] = {FEATURE_REPORT_ID, REPORT_TYPE_FEATURE};
 
 #define CHR(u16, id, fl) {.uuid = BLE_UUID16_DECLARE(u16), .access_cb = chr_access, .arg = (void *)(intptr_t)(id), .flags = (fl)}
 #define READ_ENC (BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC)
@@ -155,12 +147,6 @@ static const struct ble_gatt_svc_def s_services[] = {
                 .uuid = BLE_UUID16_DECLARE(0x2A4D), .access_cb = chr_access,
                 .arg = (void *)(intptr_t)CHR_TOUCH, .flags = READ_ENC | BLE_GATT_CHR_F_NOTIFY,
                 .val_handle = &s_touch_handle, .descriptors = REPORT_REF(s_touch_ref),
-            },
-            {
-                .uuid = BLE_UUID16_DECLARE(0x2A4D), .access_cb = chr_access,
-                .arg = (void *)(intptr_t)CHR_FEATURE,
-                .flags = READ_ENC | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
-                .descriptors = REPORT_REF(s_feature_ref),
             },
             {0},
         },

@@ -16,30 +16,52 @@ handling only: it does not prove the BLE transport.
 | Descriptor | Kernel driver | InputReader result |
 | --- | --- | --- |
 | Touch Screen, Tip Switch + X/Y, no Contact ID | `hid-generic` | `DeviceType: pointer`, mode pointer. Behaves like a touchpad |
-| Touch Screen with Contact ID, Contact Count, Contact Count Max | `hid-multitouch` | `INPUT_PROP_DIRECT`, `DeviceType: touchScreen`, mode direct, source `0x1002` |
+| Touch Screen with Contact ID and Contact Count, no Feature report | `hid-multitouch` | `INPUT_PROP_DIRECT`, `DeviceType: touchScreen`, mode direct, source `0x1002` |
 
 The second descriptor delivered a tap as `ABS_MT_*` and `BTN_TOUCH` events. It is
 used as the BLE report map, in `main/ble_hogp.c`, and pinned in the host tests.
 **Keep Contact ID in the descriptor**: an IDC file could override the device type,
 but installing one needs root.
 
+## Verified over BLE
+
+Over real BLE (bus `0x0005`) the Shield classifies the gateway as `touchScreen`,
+direct mode, source `0x1002`. An injected tap and swipe (34 reports sent)
+produced 34 `SYN_REPORT` events in the kernel, 2 presses, 2 releases, with exact
+coordinates. After rebooting the gateway it reconnected by itself in about 3 s
+with the bond kept, and touch still worked.
+
+## Report map delay
+
+After every Bluetooth reconnect the input device took about 6 s to appear. The
+likely cause is the kernel sending GET_REPORT for Contact Count Maximum and
+timing out; that is not proven. The fix is a descriptor without the Feature
+report, as above. That descriptor is verified through uhid only, NOT yet over
+BLE: the uhid test with no Feature report appeared in under 1 s and was still
+classified `touchScreen` in direct mode.
+
 ## Open questions
 
-- Behaviour over real BLE (HOGP) is untested.
-- Under uhid the device took about 5.5 s to appear and reported 10 slots instead of
-  the 1 declared. This suggests the GET_REPORT for Contact Count Max timed out,
-  possibly a limitation of the `hid` tool. On BLE the Feature report is served by
-  a GATT read; check whether the delay goes away.
 - Whether Android TV launcher and app UIs respond usefully to direct touch.
 
 ## Pairing investigation
 
-First attempts from the Shield failed with "couldn't pair". The Shield's HCI log
-shows `LE_CreateConn`, then `LE Connection Complete` (status 0), then a disconnect
-with reason `0x3E` after about 0.3 s, and the gateway logged no connection at all. So
-the gateway missed the connection setup. RSSI was about -56 dBm, and the connection
-interval was 50 ms. A Mac connected first time with Wi-Fi on, so the failure is
-specific to the Shield. The Shield was streaming A2DP audio at the time.
+First attempts from the Shield failed with "couldn't pair" while it was
+streaming A2DP audio to a speaker in another room; pairing succeeded after that
+speaker was disconnected. The Shield's HCI log shows `LE_CreateConn`, then
+`LE Connection Complete` (status 0), then a disconnect with reason `0x3E` after
+about 0.3 s, and the gateway logged no connection at all. So the gateway missed
+the connection setup. RSSI was about -56 dBm, and the connection interval was
+50 ms. Whether the audio stream or the distance mattered is unknown; retest with
+the speaker nearby. A Mac connected first time with Wi-Fi on.
+
+mDNS name lookup got less reliable once BLE was connected.
 
 The HCI log comes from `adb shell dumpsys bluetooth_manager` (the
 `BTSNOOP_LOG_SUMMARY` section: base64, then zlib).
+
+## Warning
+
+Android may cache a bonded device's GATT table and report map, so after changing
+the report map forget the device on the Android side and re-pair before
+comparing behaviour.

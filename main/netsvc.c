@@ -162,6 +162,37 @@ static esp_err_t h_touch(httpd_req_t *r)
     return httpd_resp_sendstr(r, ble_hogp_ready() ? "sent\n" : "queued, BLE not ready\n");
 }
 
+// Drags on the device, so points stay ~15 ms apart. One HTTP request per point
+// arrives ~90 ms apart over Wi-Fi, which cannot test smooth dragging.
+static esp_err_t h_swipe(httpd_req_t *r)
+{
+    if (!authorised(r)) {
+        return ESP_OK;
+    }
+    int x1 = query_int(r, "x1", -1), y1 = query_int(r, "y1", -1);
+    int x2 = query_int(r, "x2", -1), y2 = query_int(r, "y2", -1);
+    int ms = query_int(r, "ms", -1);
+    if (x1 < 0 || x1 > 32767 || y1 < 0 || y1 > 32767 ||
+        x2 < 0 || x2 > 32767 || y2 < 0 || y2 > 32767 ||
+        ms < 50 || ms > 3000) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "x1, y1, x2, y2 must be 0..32767, ms 50..3000");
+    }
+    int steps = ms / 15;
+    if (steps < 1) {
+        steps = 1;
+    }
+    for (int i = 0; i <= steps; i++) {
+        int x = x1 + (x2 - x1) * i / steps;
+        int y = y1 + (y2 - y1) * i / steps;
+        relay_submit(true, (uint16_t)x, (uint16_t)y);
+        if (i < steps) {
+            vTaskDelay(pdMS_TO_TICKS(15));
+        }
+    }
+    relay_submit(false, (uint16_t)x2, (uint16_t)y2);
+    return httpd_resp_sendstr(r, ble_hogp_ready() ? "sent\n" : "queued, BLE not ready\n");
+}
+
 static void reboot_later(void *arg)
 {
     (void)arg;
@@ -296,6 +327,7 @@ static void http_start(void)
         {.uri = "/log", .method = HTTP_GET, .handler = h_log},
         {.uri = "/usb/desc", .method = HTTP_GET, .handler = h_desc},
         {.uri = "/touch", .method = HTTP_POST, .handler = h_touch},
+        {.uri = "/swipe", .method = HTTP_POST, .handler = h_swipe},
         {.uri = "/ota", .method = HTTP_POST, .handler = h_ota},
         {.uri = "/reboot", .method = HTTP_POST, .handler = h_reboot},
         {.uri = "/forget", .method = HTTP_POST, .handler = h_forget},

@@ -7,7 +7,13 @@
 - StampS3 v0.2 schematic reviewed (`docs/hardware.md`).
 - ADB access to the Shield works.
 - Through uhid, the Shield treats a Contact ID digitizer as a true touchscreen
-  (`docs/android-compat.md`).
+  (`docs/android-compat.md`). A variant of that descriptor without the Feature
+  report also appears through uhid in under 1 s as `touchScreen` in direct mode.
+- Over real BLE the Shield pairs with the gateway, classifies it as `touchScreen`
+  in direct mode (source `0x1002`), and an injected tap and swipe arrive exactly
+  (34 reports sent, 34 `SYN_REPORT`, 2 presses, 2 releases). After a gateway
+  reboot it reconnects by itself in about 3 s with the bond kept, and touch
+  still works (`docs/android-compat.md`).
 
 - Independent pre-flash code review completed; verified defects fixed. Plain HTTP
   and unsigned OTA are accepted for development; revisit before any production use.
@@ -22,7 +28,7 @@
 
 ## Not yet run on hardware
 
-BLE pairing and HID reports, USB host, hub enumeration, the LED, and the touch path.
+USB host, hub enumeration, the LED, and the touch path.
 
 ## Unknown
 
@@ -30,9 +36,13 @@ BLE pairing and HID reports, USB host, hub enumeration, the LED, and the touch p
 - VBUS and CC behaviour of the monitor's touch port.
 - Whether ESP-IDF hub support works with the monitor's internal hub.
 - One `No route to host` on the first request after boot: seen once, not investigated.
+- Whether the A2DP stream or the distance blocked the first pairing attempts.
+- Whether the no-Feature report map removes the ~6 s delay over BLE (it is
+  verified through uhid only). Android may cache the old map, so retest after
+  forget and re-pair.
 
 ## Next
 
-1. Pair with the Shield and test injected touches (BLE path, no monitor needed).
+1. Verify the no-Feature report map over BLE (forget and re-pair first).
 2. Try connection Option A, then B. Capture real USB reports.
 3. Full integration, then standalone tests.

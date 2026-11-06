@@ -44,6 +44,9 @@ python3 tools/u2b.py swipe 0.2 0.5 0.8 0.5
 python3 tools/u2b.py wifi-pause 90 # test Bluetooth without Wi-Fi radio sharing
 ```
 
+`swipe` sends a single request; the gateway interpolates the drag on-device,
+submitting a point about every 15 ms.
+
 The device answers at `u2b-touch.local`; set `U2B_HOST` if mDNS is unavailable. Every
 endpoint needs the token.
 

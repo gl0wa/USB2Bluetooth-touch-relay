@@ -28,8 +28,20 @@ def config():
 
 def call(path, method="GET", data=None, timeout=10):
     host, token = config()
-    req = urllib.request.Request(f"http://{host}{path}", method=method, data=data, headers={"X-Token": token})
-    return urllib.request.urlopen(req, timeout=timeout)
+    # The radio is shared with Bluetooth now, so the first lookup or request can
+    # fail transiently. Retry reads only: repeating a POST could double-send
+    # OTA, reboot, forget or touch input.
+    attempts = 3 if method == "GET" else 1
+    for attempt in range(attempts):
+        req = urllib.request.Request(f"http://{host}{path}", method=method, data=data, headers={"X-Token": token})
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except urllib.error.URLError:
+            if attempt + 1 >= attempts:
+                raise
+            time.sleep(1)
 
 
 def cmd_status(_):
@@ -76,12 +88,9 @@ def cmd_tap(args):
 
 
 def cmd_swipe(args):
-    steps = max(2, int(args.duration / 0.02))
-    for i in range(steps + 1):
-        f = i / steps
-        touch(to_raw(args.x1 + (args.x2 - args.x1) * f), to_raw(args.y1 + (args.y2 - args.y1) * f), True)
-        time.sleep(args.duration / steps)
-    touch(to_raw(args.x2), to_raw(args.y2), False)
+    ms = int(args.duration * 1000)
+    call(f"/swipe?x1={to_raw(args.x1)}&y1={to_raw(args.y1)}&x2={to_raw(args.x2)}&y2={to_raw(args.y2)}&ms={ms}",
+         "POST", b"", timeout=10 + args.duration)
 
 
 def cmd_wifi_pause(args):
