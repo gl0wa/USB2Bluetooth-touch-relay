@@ -1,0 +1,27 @@
+# Build output
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+*.bin
+*.elf
+*.map
+
+# Local secrets and machine-specific config (never commit)
+.local/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Captures can contain addresses or other device data; curate before adding
+captures/
+
+# Tooling
+.DS_Store
+__pycache__/
+.vscode/
+.cache/
+.claude/settings.local.json
