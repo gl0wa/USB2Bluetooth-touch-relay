@@ -250,19 +250,20 @@ static void test_map(void)
     CHECK(x == 16383);
 }
 
-// The Consumer Back/Home suffix appended to the BLE report map (report 2:
-// bit0 AC Back, bit1 AC Home). Byte-exact per the uhid-tested layout.
+// The Consumer key suffix appended to the BLE report map (report 2:
+// bit0 AC Back, bit1 AC Home, bit2 Up, bit3 Down, bit4 Left, bit5 Right,
+// bit6 Select). Byte-exact per the uhid-tested layout.
 static const uint8_t keys_suffix[] = {
-    0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x15,0x00,0x25,0x01,0x75,0x01,
-    0x95,0x02,0x81,0x02,0x95,0x06,0x81,0x03,0xC0};
+    0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x09,0x42,0x09,0x43,0x09,0x44,
+    0x09,0x45,0x09,0x41,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x07,0x81,0x02,0x95,0x01,0x81,0x03,0xC0};
 
 static void test_report_map_keys(void)
 {
     static const uint8_t expect[] = {
-        0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x15,0x00,0x25,0x01,0x75,0x01,
-        0x95,0x02,0x81,0x02,0x95,0x06,0x81,0x03,0xC0};
+        0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x09,0x42,0x09,0x43,0x09,0x44,
+        0x09,0x45,0x09,0x41,0x15,0x00,0x25,0x01,0x75,0x01,0x95,0x07,0x81,0x02,0x95,0x01,0x81,0x03,0xC0};
     CHECK(sizeof keys_suffix == sizeof expect && memcmp(keys_suffix, expect, sizeof expect) == 0);
-    CHECK(sizeof keys_suffix == 29);
+    CHECK(sizeof keys_suffix == 39);
     // The full BLE map (touch part + keys) still parses as the same touchscreen.
     uint8_t full[sizeof mt_desc + sizeof keys_suffix];
     memcpy(full, mt_desc, sizeof mt_desc);
@@ -487,6 +488,442 @@ static void test_gesture_toggle_mid(void)
     CHECK(o.n == 1 && !o.ev[0].down);
 }
 
+static void dpad_enter(gesture_t *g, gesture_out_t *o, uint32_t *now)
+{
+    // Top strip downward swipe toggles D-pad on: no key, no touch.
+    gesture_feed(g, true, 16383, 100, *now, o);
+    CHECK(o->n == 0);
+    *now += 50;
+    gesture_feed(g, true, 16383, 100 + 4000, *now, o);
+    CHECK(o->n == 0);
+    CHECK(gesture_dpad_active(g));
+    *now += 50;
+    gesture_feed(g, false, 16383, 4100, *now, o);
+    CHECK(o->n == 0);
+    CHECK(gesture_dpad_active(g));
+}
+
+static void test_dpad_enter_toggle(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    CHECK(!gesture_dpad_active(&g));
+    dpad_enter(&g, &o, &now);
+    // Second top swipe toggles off, still no key and no touch.
+    gesture_feed(&g, true, 16383, 100, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, true, 16383, 100 + 4000, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+    now += 50;
+    gesture_feed(&g, false, 16383, 4100, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_tap_select(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Centre tap gives one Select and no touch.
+    gesture_feed(&g, true, 16383, 16383, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, false, 16390, 16390, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_SELECT && o.ev[0].down);
+    CHECK(o.ev[1].is_key && o.ev[1].key == GESTURE_KEY_SELECT && !o.ev[1].down);
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_arrows(void)
+{
+    gesture_t g;
+    gesture_out_t o;
+    g_init(&g);
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Right.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    gesture_feed(&g, true, 10000 + 2500, 10000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_RIGHT);
+    now += 20;
+    gesture_feed(&g, false, 12500, 10000, now, &o);
+    CHECK(o.n == 0); // arrow produced, so no Select on release
+    now += 20;
+    // Left.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 10000 - 2500, 10000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_LEFT);
+    now += 20;
+    gesture_feed(&g, false, 7500, 10000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    // Up means y decreasing.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 10000, 10000 - 2500, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_UP);
+    now += 20;
+    gesture_feed(&g, false, 10000, 7500, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    // Down.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 10000, 10000 + 2500, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_DOWN);
+    now += 20;
+    gesture_feed(&g, false, 10000, 12500, now, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_dpad_long_drag(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    gesture_feed(&g, true, 5000, 15000, now, &o);
+    CHECK(o.n == 0);
+    int arrows = 0;
+    uint16_t x = 5000;
+    for (int i = 0; i < 3; i++) {
+        now += 20;
+        x += 2500;
+        gesture_feed(&g, true, x, 15000, now, &o);
+        CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_RIGHT);
+        arrows++;
+    }
+    CHECK(arrows == 3);
+    now += 20;
+    gesture_feed(&g, false, x, 15000, now, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_dpad_dominant_axis(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Diagonal with dominant x gives Right.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 10000 + 3000, 10000 + 1000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_RIGHT);
+    now += 20;
+    gesture_feed(&g, false, 13000, 11000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    // Diagonal with dominant y (up) gives Up.
+    gesture_feed(&g, true, 10000, 10000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 10000 + 1000, 10000 - 3000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_UP);
+    now += 20;
+    gesture_feed(&g, false, 11000, 7000, now, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_dpad_slow_drag(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    gesture_feed(&g, true, 8000, 8000, now, &o);
+    // Slow: large time gaps must still give arrows, one per input.
+    now += 2000;
+    gesture_feed(&g, true, 8000 + 2500, 8000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_RIGHT);
+    now += 2000;
+    gesture_feed(&g, true, 8000 + 5000, 8000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_RIGHT);
+    now += 20;
+    gesture_feed(&g, false, 13000, 8000, now, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_dpad_wobble_select(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Small wobble below dpad_tap still gives Select.
+    gesture_feed(&g, true, 15000, 15000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 15000 + 500, 15000 + 500, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    gesture_feed(&g, true, 15000 - 500, 15000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    gesture_feed(&g, false, 15000, 15000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_SELECT);
+}
+
+static void test_dpad_dead_zone(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Movement between dpad_tap (1200) and dpad_step (2500) gives nothing.
+    gesture_feed(&g, true, 15000, 15000, now, &o);
+    now += 20;
+    gesture_feed(&g, true, 15000 + 1500, 15000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    gesture_feed(&g, false, 16500, 15000, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_edge_priority(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Left swipe still gives Back and the mode stays on.
+    gesture_feed(&g, true, 100, 16383, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, true, 100 + 4000, 16383, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_BACK);
+    CHECK(gesture_dpad_active(&g));
+    now += 50;
+    gesture_feed(&g, false, 5000, 16383, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+    now += 50;
+    // Bottom swipe still gives Home and the mode stays on.
+    gesture_feed(&g, true, 16383, 32000, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, true, 16383, 32000 - 4000, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_HOME);
+    CHECK(gesture_dpad_active(&g));
+    now += 50;
+    gesture_feed(&g, false, 16383, 28000, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_strip_hold(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Strip hold expiry in D-pad mode emits no touch; the contact becomes
+    // a D-pad contact anchored at the start.
+    gesture_feed(&g, true, 100, 16383, now, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, now + 300, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_is_passthrough(&g));
+    // No arrow and no excursion: release gives Select, still no touch.
+    now += 400;
+    gesture_feed(&g, true, 100 + 2500, 16383, now, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_RIGHT);
+    now += 20;
+    gesture_feed(&g, false, 2600, 16383, now, &o);
+    CHECK(o.n == 0);
+    // Quick strip tap in D-pad mode is a Select with no touch.
+    now += 50;
+    gesture_feed(&g, true, 100, 16383, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, false, 120, 16390, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_SELECT);
+    for (uint8_t i = 0; i < o.n; i++) {
+        CHECK(o.ev[i].is_key);
+    }
+}
+
+static void test_dpad_idle(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    uint32_t last = now;
+    gesture_tick(&g, last + 9999, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+    gesture_tick(&g, last + 10000, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_idle_blocked(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // A contact in progress blocks the idle timeout.
+    gesture_feed(&g, true, 15000, 15000, now, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, now + 20000, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+    now += 20000;
+    gesture_feed(&g, false, 15000, 15000, now, &o);
+    // Tap release gives Select and refreshes the timer.
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_SELECT);
+    gesture_tick(&g, now + 9999, &o);
+    CHECK(gesture_dpad_active(&g));
+    gesture_tick(&g, now + 10000, &o);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_wrap(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0xFFFFFF00u;
+    dpad_enter(&g, &o, &now);
+    uint32_t last = now;
+    gesture_tick(&g, last + 9999, &o);
+    CHECK(gesture_dpad_active(&g));
+    gesture_tick(&g, last + 10001, &o);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_disabled(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    CHECK(gesture_dpad_active(&g));
+    // Disabling exits the mode immediately, and the next press passes through.
+    gesture_set_enabled(&g, false);
+    CHECK(!gesture_dpad_active(&g));
+    gesture_feed(&g, true, 16383, 16383, now, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    gesture_feed(&g, false, 16383, 16383, now + 50, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+    // No stuck touch: balance holds.
+    gesture_set_enabled(&g, true);
+    gesture_feed(&g, true, 16383, 16383, now + 100, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key);
+    gesture_feed(&g, false, 16383, 16383, now + 150, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_random(void)
+{
+    // Random contacts in D-pad mode: touch down/up stay balanced and
+    // D-pad contacts emit no touch at all.
+    srand(999);
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    bool active = false;
+    int presses = 0, releases = 0;
+    for (int c = 0; c < 300; c++) {
+        uint16_t sx = (uint16_t)(rand() % 32768);
+        uint16_t sy = (uint16_t)(rand() % 32768);
+        now += (uint32_t)(rand() % 400);
+        gesture_feed(&g, true, sx, sy, now, &o);
+        for (uint8_t i = 0; i < o.n; i++) {
+            if (o.ev[i].is_key) {
+                continue;
+            }
+            if (o.ev[i].down && !active) {
+                active = true;
+                presses++;
+            } else if (!o.ev[i].down && active) {
+                active = false;
+                releases++;
+            }
+            CHECK(presses == releases || presses == releases + 1);
+        }
+        int moves = rand() % 5;
+        for (int m = 0; m < moves; m++) {
+            uint16_t mx = (uint16_t)(rand() % 32768);
+            uint16_t my = (uint16_t)(rand() % 32768);
+            now += (uint32_t)(rand() % 120);
+            gesture_feed(&g, true, mx, my, now, &o);
+            for (uint8_t i = 0; i < o.n; i++) {
+                if (o.ev[i].is_key) {
+                    continue;
+                }
+                if (o.ev[i].down && !active) {
+                    active = true;
+                    presses++;
+                } else if (!o.ev[i].down && active) {
+                    active = false;
+                    releases++;
+                }
+                CHECK(presses == releases || presses == releases + 1);
+            }
+            CHECK(gesture_is_passthrough(&g) == false || o.n <= 2);
+            if (rand() % 3 == 0) {
+                now += (uint32_t)(rand() % 400);
+                gesture_tick(&g, now, &o);
+                CHECK(o.n == 0); // tick never emits touch in D-pad mode
+                for (uint8_t i = 0; i < o.n; i++) {
+                    CHECK(o.ev[i].is_key);
+                }
+            }
+        }
+        uint16_t ex = (uint16_t)(rand() % 32768);
+        uint16_t ey = (uint16_t)(rand() % 32768);
+        now += (uint32_t)(rand() % 400);
+        gesture_feed(&g, false, ex, ey, now, &o);
+        for (uint8_t i = 0; i < o.n; i++) {
+            if (o.ev[i].is_key) {
+                continue;
+            }
+            if (o.ev[i].down && !active) {
+                active = true;
+                presses++;
+            } else if (!o.ev[i].down && active) {
+                active = false;
+                releases++;
+            }
+            CHECK(presses == releases || presses == releases + 1);
+        }
+        CHECK(!active);
+        // Keep the mode alive: any contact refreshes the timer, but a long
+        // random gap could idle out, so re-enter if needed.
+        if (!gesture_dpad_active(&g)) {
+            dpad_enter(&g, &o, &now);
+            CHECK(gesture_dpad_active(&g));
+        }
+    }
+    CHECK(presses == releases);
+    CHECK(presses == 0); // D-pad contacts emit no touch at all
+}
+
 static void test_gesture_random(void)
 {
     srand(12345);
@@ -597,6 +1034,21 @@ int main(void)
     test_gesture_idle_release();
     test_gesture_wrap();
     test_gesture_toggle_mid();
+    test_dpad_enter_toggle();
+    test_dpad_tap_select();
+    test_dpad_arrows();
+    test_dpad_long_drag();
+    test_dpad_dominant_axis();
+    test_dpad_slow_drag();
+    test_dpad_wobble_select();
+    test_dpad_dead_zone();
+    test_dpad_edge_priority();
+    test_dpad_strip_hold();
+    test_dpad_idle();
+    test_dpad_idle_blocked();
+    test_dpad_wrap();
+    test_dpad_disabled();
+    test_dpad_random();
     test_gesture_random();
     printf(failures ? "%d FAILED\n" : "all passed\n", failures);
     return failures != 0;

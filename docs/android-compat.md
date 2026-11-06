@@ -26,8 +26,9 @@ but installing one needs root.
 ## Combined touch plus Back/Home keys
 
 The BLE report map appends a Consumer Control collection (report 2: bit0 AC
-Back, bit1 AC Home) after the touch collection, with no Feature report. The
-map bytes are unchanged in both HID modes.
+Back, bit1 AC Home, bit2 Up, bit3 Down, bit4 Left, bit5 Right, bit6 Select)
+after the touch collection, with no Feature report. The map bytes changed
+when the D-pad keys were added, so re-pair once after updating.
 
 Measured over BLE with two Input Report characteristics (HCI capture): Android
 discovered both but read the Report Reference and wrote the CCCD for the first
@@ -46,7 +47,16 @@ prepending a report ID only when it is non-zero; that was not read from source,
 but the behaviour is confirmed on hardware: on the Shield, Back and Home work over
 BLE and touch is unaffected. It is non-standard HOGP. Hosts other than this Android
 stack may misparse it, so a standard mode exists
-(`hid-mode standard`): normal report IDs, touch only, no Back/Home keys.
+(`hid-mode standard`): normal report IDs, touch only, no keys.
+
+## D-pad report map (uhid only, not yet over BLE or on screen)
+
+The extended Consumer collection (Back/Home plus Up/Down/Left/Right/Select)
+was tested through uhid only: touch stayed `touchScreen` direct mode and the
+key bits reached the kernel, where Android's `Generic.kl` maps them to
+`DPAD_*`. Sources were `0x1303`. This exercises the descriptor and the
+kernel/InputReader path only. D-pad keys over BLE and behaviour on screen
+are NOT yet verified; re-pair once after the map change before comparing.
 
 uhid tests exercise the descriptor and the kernel/InputReader path only; they
 do not exercise HOGP GATT setup (service discovery, Report Reference reads,

@@ -34,6 +34,14 @@ for Back, up from the BOTTOM edge for Home. Turn them off with
 `python3 tools/u2b.py gestures off` (for example on devices other than
 Android TV). The setting survives reboot and re-provisioning.
 
+A D-pad mode covers controls that ignore touch, such as the launcher's
+top tabs. Swipe DOWN from the TOP edge to toggle it. In D-pad mode
+swipes become arrow keys and a tap becomes Select: swipe for Up/Down/
+Left/Right (a long drag repeats), tap for Select. Swipe down from the
+top edge again to leave, or wait 10 s with no contact. The LED is cyan
+in D-pad mode. `gestures off` disables edge gestures and D-pad mode
+together. Edge Back/Home still work while D-pad mode is on.
+
 If touch misbehaves on a device other than Android TV, try standard HID mode:
 
 ```sh
@@ -41,6 +49,8 @@ python3 tools/u2b.py hid-mode standard
 ```
 
 This needs a reboot and a re-pair to apply, and it has no Back/Home keys.
+In standard HID mode gestures and D-pad mode stay off and `gestures on`
+does not enable them; the saved setting is kept.
 Keep `gestures off` as the simple switch for non-Android hosts; use standard
 mode only if touch itself misbehaves.
 

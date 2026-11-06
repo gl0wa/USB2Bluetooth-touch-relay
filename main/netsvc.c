@@ -72,13 +72,14 @@ static esp_err_t h_status(httpd_req_t *r)
     char out[768];
     int n = snprintf(out, sizeof out,
                      "{\"version\":\"%s\",\"partition\":\"%s\",\"unconfirmed\":%d,\"uptime_s\":%" PRIu64 ",\"reset_reason\":%d,"
-                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,\"gestures\":%d,\"standard_hid\":%d,"
+                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,\"gestures\":%d,\"dpad\":%d,\"standard_hid\":%d,"
                      "\"ble\":{\"connected\":%d,\"encrypted\":%d,\"subscribed\":%d,\"bonds\":%d,\"itvl\":%u,"
                      "\"sent\":%" PRIu32 ",\"failed\":%" PRIu32 ",\"keys\":%" PRIu32 "},"
                      "\"usb\":{\"host\":%d,\"attached\":%d,\"touch\":%d,\"vid\":%u,\"pid\":%u,\"kind\":%u,"
                      "\"iface\":%u,\"contacts\":%u,\"reports\":%" PRIu32 ",\"touches\":%" PRIu32 ",\"errors\":%" PRIu32 "}}\n",
                      esp_app_get_description()->version, run->label, running_unconfirmed(), (uint64_t)(esp_timer_get_time() / 1000000),
                      (int)esp_reset_reason(), esp_get_free_heap_size(), ap.rssi, relay_get_gestures() ? 1 : 0,
+                     relay_get_dpad() ? 1 : 0,
                      b.standard_hid ? 1 : 0,
                      b.connected, b.encrypted, b.subscribed, b.bonds, b.conn_itvl, b.sent, b.send_failed, b.keys_sent,
                      u.started, u.attached, u.has_touch, u.vid, u.pid, u.kind, u.iface, u.contacts,
@@ -234,8 +235,9 @@ static esp_err_t h_config(httpd_req_t *r)
     return httpd_resp_send(r, out, n);
 }
 
-// Sends Back/Home directly, for testing Bluetooth keys without gestures.
-// Works regardless of the switch.
+// Sends keys directly, for testing Bluetooth keys without gestures.
+// Works regardless of the switch (but not in standard HID mode, where
+// ble_hogp_send_keys refuses keys).
 static esp_err_t h_key(httpd_req_t *r)
 {
     if (!authorised(r)) {
@@ -244,15 +246,25 @@ static esp_err_t h_key(httpd_req_t *r)
     char q[64], v[16];
     if (httpd_req_get_url_query_str(r, q, sizeof q) != ESP_OK ||
         httpd_query_key_value(q, "k", v, sizeof v) != ESP_OK) {
-        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back or home");
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back, home, up, down, left, right or select");
     }
     uint8_t bit;
     if (strcmp(v, "back") == 0) {
         bit = 1;
     } else if (strcmp(v, "home") == 0) {
         bit = 2;
+    } else if (strcmp(v, "up") == 0) {
+        bit = 4;
+    } else if (strcmp(v, "down") == 0) {
+        bit = 8;
+    } else if (strcmp(v, "left") == 0) {
+        bit = 16;
+    } else if (strcmp(v, "right") == 0) {
+        bit = 32;
+    } else if (strcmp(v, "select") == 0) {
+        bit = 64;
     } else {
-        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back or home");
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back, home, up, down, left, right or select");
     }
     bool sent = ble_hogp_send_keys(bit);
     int64_t deadline = esp_timer_get_time() + 200 * 1000;

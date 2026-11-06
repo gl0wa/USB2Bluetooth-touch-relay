@@ -29,10 +29,11 @@ static const char *TAG = "ble";
 // Without it the Shield maps a digitizer as a pointer. Do not add a Feature
 // report back: the kernel GET_REPORTs it on every reconnect and the resulting
 // timeout delays the input device by about 6 s. The trailing Consumer Control
-// collection (report 2: bit0 AC Back, bit1 AC Home) was tested through uhid:
-// touch stays touchScreen direct and KEY_BACK/KEY_HOMEPAGE reach the kernel.
-// Toggling gestures never re-pairs: the map stays identical when keys are off.
-// See docs/android-compat.md before changing this.
+// collection (report 2: bit0 AC Back, bit1 AC Home, bit2 Up, bit3 Down,
+// bit4 Left, bit5 Right, bit6 Select) was tested through uhid: touch stays
+// touchScreen direct and keys reach the kernel and Android's Generic.kl maps
+// them to DPAD_*. Toggling gestures never re-pairs: the map stays identical
+// when keys are off. See docs/android-compat.md before changing this.
 static const uint8_t s_report_map[] = {
     0x05, 0x0D,       // Usage Page (Digitizer)
     0x09, 0x04,       // Usage (Touch Screen)
@@ -62,8 +63,13 @@ static const uint8_t s_report_map[] = {
     0x85, KEYS_REPORT_ID,
     0x0A, 0x24, 0x02, // Usage (AC Back)
     0x0A, 0x23, 0x02, // Usage (AC Home)
-    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x02, 0x81, 0x02,
-    0x95, 0x06, 0x81, 0x03, // padding
+    0x09, 0x42,       // bit2 Up
+    0x09, 0x43,       // bit3 Down
+    0x09, 0x44,       // bit4 Left
+    0x09, 0x45,       // bit5 Right
+    0x09, 0x41,       // bit6 Select
+    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x07, 0x81, 0x02,
+    0x95, 0x01, 0x81, 0x03, // padding
     0xC0,             // End Collection
 };
 
@@ -378,7 +384,7 @@ bool ble_hogp_send_keys(uint8_t bits)
     if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_subscribed) {
         return false;
     }
-    const uint8_t r[2] = {KEYS_REPORT_ID, (uint8_t)(bits & 0x03)};
+    const uint8_t r[2] = {KEYS_REPORT_ID, (uint8_t)(bits & 0x7F)};
     struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
     if (!om || ble_gatts_notify_custom(conn, s_touch_handle, om) != 0) {
         return false;

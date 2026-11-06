@@ -17,7 +17,7 @@ waits 1.5 s for USB SOF packets:
 | USB-C is connected to | Mode | LED |
 | --- | --- | --- |
 | A computer | Maintenance: serial console, no USB host | Blue pulse |
-| Anything else | USB host, logs over Wi-Fi only | Red blink: no touch device. Yellow blink: waiting for Bluetooth. Green: relaying |
+| Anything else | USB host, logs over Wi-Fi only | Red blink: no touch device. Yellow blink: waiting for Bluetooth. Green: relaying. Cyan: D-pad mode |
 
 Switching between them needs a reset, which replugging provides.
 
@@ -54,6 +54,15 @@ moving right, for Back; swipe up from the BOTTOM edge for Home. A short
 press of the StampS3 button is Back as a fallback. Edge taps and drags
 still work as touches, only slightly late.
 
+A D-pad mode covers controls that ignore touch, such as the launcher's
+top tabs. Swipe DOWN from the TOP edge to toggle it. In D-pad mode
+swipes become arrow keys and a tap becomes Select: swipe right/left/up
+(y decreasing)/down for the arrows, a long drag repeats, tap for Select.
+Swipe down from the top edge again to leave, or wait 10 s with no contact
+(auto exit). The LED is cyan in D-pad mode, taking priority over green.
+`gestures off` disables edge gestures and D-pad mode together. Edge
+Back/Home still work while D-pad mode is on; only the top toggle leaves it.
+
 ```sh
 python3 tools/u2b.py gestures off  # or: on
 python3 tools/u2b.py key back       # test Bluetooth keys without gestures
@@ -73,7 +82,9 @@ python3 tools/u2b.py hid-mode standard  # or: android
 
 This saves `standard_hid` in default NVS (`cfg` namespace), then needs a
 reboot and a re-pair to apply. Standard mode uses normal HOGP report IDs
-and has no Back/Home keys. Android TV uses the default `android` mode.
+and has no keys: gestures and D-pad mode stay off while it is active, and
+`gestures on` does not enable them (the saved setting is kept). Android TV
+uses the default `android` mode.
 
 The device answers at `u2b-touch.local`; set `U2B_HOST` if mDNS is unavailable. Every
 endpoint needs the token.

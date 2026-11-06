@@ -48,6 +48,10 @@ static led_strip_handle_t s_led;
 static gesture_t s_gesture;
 static bool s_gestures_enabled = true;
 static bool s_standard_hid;
+// Volatile copy of the D-pad mode for other tasks (main loop LED,
+// /status). Written only by relay_task, the single gesture engine consumer,
+// so plain bool reads elsewhere are safe.
+static volatile bool s_dpad_active;
 
 static void enqueue(touch_evt_t e)
 {
@@ -87,7 +91,9 @@ static bool gestures_load(void)
 void relay_set_gestures(bool enabled)
 {
     s_gestures_enabled = enabled;
-    gesture_set_enabled(&s_gesture, enabled);
+    // In standard HID mode keys cannot be sent, so the engine stays
+    // disabled without changing the saved setting.
+    gesture_set_enabled(&s_gesture, enabled && !s_standard_hid);
     nvs_handle_t h;
     if (nvs_open(GESTURE_NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
         nvs_set_u8(h, GESTURE_NVS_KEY, enabled ? 1 : 0);
@@ -99,7 +105,14 @@ void relay_set_gestures(bool enabled)
 
 bool relay_get_gestures(void)
 {
-    return s_gestures_enabled;
+    // Reports the effective switch: forced off in standard HID mode, where
+    // keys cannot be sent and swipes must stay touches.
+    return s_gestures_enabled && !s_standard_hid;
+}
+
+bool relay_get_dpad(void)
+{
+    return s_dpad_active;
 }
 
 static bool std_hid_load(void)
@@ -169,6 +182,28 @@ static void send_key_bits(uint8_t bits, const char *why)
     ESP_LOGI(TAG, "%s", why);
 }
 
+static const char *key_label(uint8_t key)
+{
+    switch (key) {
+    case GESTURE_KEY_BACK:
+        return "gesture Back";
+    case GESTURE_KEY_HOME:
+        return "gesture Home";
+    case GESTURE_KEY_UP:
+        return "gesture Up";
+    case GESTURE_KEY_DOWN:
+        return "gesture Down";
+    case GESTURE_KEY_LEFT:
+        return "gesture Left";
+    case GESTURE_KEY_RIGHT:
+        return "gesture Right";
+    case GESTURE_KEY_SELECT:
+        return "gesture Select";
+    default:
+        return "gesture key";
+    }
+}
+
 static void send_gesture_out(const gesture_out_t *out, bool *sent_down)
 {
     for (uint8_t i = 0; i < out->n; i++) {
@@ -176,7 +211,7 @@ static void send_gesture_out(const gesture_out_t *out, bool *sent_down)
         if (ev->is_key) {
             // send_key_bits does press and release, so act on the press event only.
             if (ev->down) {
-                send_key_bits(ev->key, ev->key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
+                send_key_bits(ev->key, key_label(ev->key));
             }
         } else if (ble_hogp_ready()) {
             send_touch_evt(ev->down, ev->x, ev->y, sent_down);
@@ -186,10 +221,22 @@ static void send_gesture_out(const gesture_out_t *out, bool *sent_down)
     }
 }
 
+// Logs D-pad mode transitions once each. Call with the mode before and after
+// a feed/tick plus send.
+static void log_dpad_change(bool before, bool after)
+{
+    if (before == after) {
+        return;
+    }
+    ESP_LOGI(TAG, "dpad %s", after ? "on" : "off");
+}
+
 // The engine runs here only, the single consumer, so it needs no lock.
 // Move coalescing stays but only while the engine is passing the contact
 // through: a held edge press must keep every sample or it could miss the
-// trigger. On timeout the hold expiry is polled through gesture_tick.
+// trigger. gesture_is_passthrough is false during HELD, FIRED and DPAD
+// contacts, so D-pad samples are kept. On timeout the hold expiry is polled
+// through gesture_tick.
 static void relay_task(void *arg)
 {
     (void)arg;
@@ -197,13 +244,17 @@ static void relay_task(void *arg)
     bool sent_down = false;
     for (;;) {
         if (xQueueReceive(s_touch_q, &e, pdMS_TO_TICKS(20)) != pdTRUE) {
+            bool before = gesture_dpad_active(&s_gesture);
             gesture_out_t out;
             gesture_tick(&s_gesture, (uint32_t)(esp_timer_get_time() / 1000), &out);
             send_gesture_out(&out, &sent_down);
+            bool after = gesture_dpad_active(&s_gesture);
+            s_dpad_active = after;
+            log_dpad_change(before, after);
             continue;
         }
         if (e.is_key) {
-            if (s_gestures_enabled) {
+            if (relay_get_gestures()) {
                 send_key_bits(GESTURE_KEY_BACK, "button Back");
             }
             continue;
@@ -212,9 +263,13 @@ static void relay_task(void *arg)
                xQueuePeek(s_touch_q, &next, 0) == pdTRUE && next.down && !next.is_key) {
             xQueueReceive(s_touch_q, &e, 0);
         }
+        bool before = gesture_dpad_active(&s_gesture);
         gesture_out_t out;
         gesture_feed(&s_gesture, e.down, e.x, e.y, (uint32_t)(esp_timer_get_time() / 1000), &out);
         send_gesture_out(&out, &sent_down);
+        bool after = gesture_dpad_active(&s_gesture);
+        s_dpad_active = after;
+        log_dpad_change(before, after);
     }
 }
 
@@ -318,8 +373,11 @@ void app_main(void)
     s_gestures_enabled = gestures_load();
     s_standard_hid = std_hid_load();
     gesture_cfg_t gc = gesture_default_cfg();
-    gc.enabled = s_gestures_enabled;
+    // Standard HID has no keys: force the engine off without changing the
+    // saved gestures setting, or swipes would be swallowed for nothing.
+    gc.enabled = s_gestures_enabled && !s_standard_hid;
     gesture_init(&s_gesture, gc);
+    s_dpad_active = false;
     s_touch_q = xQueueCreate(64, sizeof(touch_evt_t));
     xTaskCreate(relay_task, "relay", 4096, NULL, 7, NULL); // logs, so needs room for vsnprintf
 
@@ -368,6 +426,8 @@ void app_main(void)
             set_led(blink ? 24 : 0, 0, 0);          // red blink: no touch device
         } else if (!ble_hogp_ready()) {
             set_led(blink ? 24 : 0, blink ? 24 : 0, 0); // yellow blink: waiting for Bluetooth
+        } else if (s_dpad_active) {
+            set_led(0, 16, 16);                     // cyan: D-pad mode
         } else {
             set_led(0, 16, 0);                      // green: relaying
         }

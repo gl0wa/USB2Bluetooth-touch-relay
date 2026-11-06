@@ -149,8 +149,8 @@ def main():
     p = sub.add_parser("hid-mode", help="HID report mode, persists; needs reboot and re-pair")
     p.add_argument("mode", choices=("android", "standard"))
     p.set_defaults(fn=cmd_hid_mode)
-    p = sub.add_parser("key", help="send a Bluetooth Back/Home key directly, bypasses the switch")
-    p.add_argument("which", choices=("back", "home"))
+    p = sub.add_parser("key", help="send a Bluetooth key directly, bypasses the switch")
+    p.add_argument("which", choices=("back", "home", "up", "down", "left", "right", "select"))
     p.set_defaults(fn=cmd_key)
     args = parser.parse_args()
     try:
