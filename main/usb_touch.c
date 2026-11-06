@@ -39,6 +39,7 @@ static const char *TAG = "usb";
 static iface_t s_if[MAX_IFACES];
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static int s_active = -1;
+static bool s_sticky; // active proved itself with a real touch: keep it across later attaches
 static usb_touch_status_t s_st;
 static QueueHandle_t s_events;
 
@@ -66,8 +67,21 @@ static iface_t *find_iface(hid_host_device_handle_t h)
 
 static void choose_active(void)
 {
-    int best = -1;
     taskENTER_CRITICAL(&s_lock);
+    int cur = s_active;
+    bool cur_valid =
+        cur >= 0 && cur < MAX_IFACES && s_if[cur].h && s_if[cur].layout.kind != HT_KIND_NONE;
+    if (cur_valid && (s_sticky || s_if[cur].state.tracking)) {
+        // A proven contact, or one mid-touch, survives later attaches and
+        // disconnects of other interfaces. Only losing this interface reselects.
+        s_st.has_touch = true;
+        s_st.kind = (uint8_t)s_if[cur].layout.kind;
+        s_st.iface = s_if[cur].iface;
+        s_st.contacts = s_if[cur].layout.contacts;
+        taskEXIT_CRITICAL(&s_lock);
+        return;
+    }
+    int best = -1;
     for (int i = 0; i < MAX_IFACES; i++) {
         if (s_if[i].h && s_if[i].layout.kind != HT_KIND_NONE &&
             (best < 0 || s_if[i].layout.kind > s_if[best].layout.kind)) {
@@ -75,6 +89,7 @@ static void choose_active(void)
         }
     }
     s_active = best;
+    s_sticky = false;
     s_st.has_touch = best >= 0;
     if (best >= 0) {
         s_st.kind = (uint8_t)s_if[best].layout.kind;
@@ -96,11 +111,47 @@ static void on_report(iface_t *f)
     }
     s_st.reports++;
     f->recoveries = 0;
+    taskENTER_CRITICAL(&s_lock);
+    int active = s_active;
+    taskEXIT_CRITICAL(&s_lock);
     if (f->raw_logged < RAW_LOG_LIMIT) {
         f->raw_logged++;
-        log_hex(f == &s_if[s_active < 0 ? 0 : s_active] ? "in" : "in-other", data, len);
+        log_hex(f == &s_if[active < 0 ? 0 : active] ? "in" : "in-other", data, len);
     }
-    if (s_active < 0 || f != &s_if[s_active]) {
+    if (f->layout.kind == HT_KIND_NONE) {
+        return;
+    }
+    if (active < 0 || f != &s_if[active]) {
+        // Another interface may carry the touches. Decode with its own state,
+        // so the active contact is never disturbed.
+        ht_touch_t t;
+        if (!ht_decode(&f->layout, data, len, &f->state, &t) || !t.down) {
+            return;
+        }
+        taskENTER_CRITICAL(&s_lock);
+        int cur = s_active;
+        bool cur_tracking =
+            cur >= 0 && cur < MAX_IFACES && s_if[cur].h && s_if[cur].state.tracking;
+        int idx = (int)(f - s_if);
+        bool ok = !cur_tracking && idx >= 0 && idx < MAX_IFACES && s_if[idx].h &&
+                  s_if[idx].layout.kind != HT_KIND_NONE;
+        if (ok) {
+            s_active = idx;
+            s_sticky = true;
+            s_st.has_touch = true;
+            s_st.kind = (uint8_t)s_if[idx].layout.kind;
+            s_st.iface = s_if[idx].iface;
+            s_st.contacts = s_if[idx].layout.contacts;
+        }
+        uint8_t iface = s_st.iface, kind = s_st.kind, contacts = s_st.contacts;
+        taskEXIT_CRITICAL(&s_lock);
+        if (!ok) {
+            return;
+        }
+        ESP_LOGI(TAG, "using interface %u: kind=%d contacts=%d (switched on touch)", iface, kind,
+                 contacts);
+        s_st.touches++; // the press that caused the switch is forwarded, not lost
+        relay_submit(t.down, t.x, t.y);
         return;
     }
     ht_touch_t t;

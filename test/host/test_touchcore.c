@@ -149,6 +149,37 @@ static void test_real_panel(void)
     CHECK(l.kind == HT_KIND_ABS_MOUSE && l.report_id == 7);
 }
 
+// Layout of the real panel's absolute-mouse interface: report 0x07, buttons,
+// 16-bit X/Y, wheel. The panel sends all touches here, nothing on 0x0D.
+static void test_real_panel_mouse(void)
+{
+    ht_layout_t l;
+    CHECK(ht_parse_descriptor(panel_mouse_desc, sizeof panel_mouse_desc, &l));
+    CHECK(l.kind == HT_KIND_ABS_MOUSE && l.report_id == 7 && l.contacts == 1);
+
+    ht_state_t st = {0};
+    ht_touch_t t;
+    uint8_t press[] = {0x07, 0x01, 0x5D, 0x2C, 0xD7, 0x15, 0x00};
+    CHECK(ht_decode(&l, press, sizeof press, &st, &t));
+    CHECK(t.down && t.x == 0x2C5D * 32767 / 0x3FFF && t.y == 0x15D7 * 32767 / 0x257F);
+    CHECK(st.tracking);
+
+    uint8_t release[] = {0x07, 0x00, 0x5D, 0x2C, 0xD7, 0x15, 0x00};
+    CHECK(ht_decode(&l, release, sizeof release, &st, &t));
+    CHECK(!t.down && !st.tracking);
+
+    // Hover with the button up while idle is not a touch: ht_decode reports
+    // nothing (returns false) and starts no contact. That is the correct
+    // behaviour for a mouse hover, so assert it.
+    CHECK(!ht_decode(&l, release, sizeof release, &st, &t));
+    CHECK(!st.tracking);
+
+    uint8_t press2[] = {0x07, 0x01, 0xCC, 0x20, 0x88, 0x0C, 0x00};
+    CHECK(ht_decode(&l, press2, sizeof press2, &st, &t));
+    CHECK(t.down && t.x == 0x20CC * 32767 / 0x3FFF && t.y == 0x0C88 * 32767 / 0x257F);
+    CHECK(st.tracking);
+}
+
 static void test_mice(void)
 {
     ht_layout_t l;
@@ -222,6 +253,7 @@ int main(void)
     test_two_fingers();
     test_hybrid();
     test_real_panel();
+    test_real_panel_mouse();
     test_mice();
     test_robustness();
     test_map();

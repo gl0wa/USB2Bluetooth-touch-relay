@@ -19,16 +19,27 @@
   and unsigned OTA are accepted for development; revisit before any production use.
 
 - Monitor USB topology and descriptors captured; the parser decodes that layout in
-  host tests (`docs/hardware.md`). No real reports captured yet.
+  host tests (`docs/hardware.md`). Real reports captured on hardware (see above).
 
 - On the real board (ESP32-S3, 8 MB embedded flash): firmware boots, advertises on
   BLE, joins Wi-Fi, and detects a computer and stays in maintenance mode.
 - OTA on the real board: a wrong token is rejected, upload takes about 20 s, an
-  unconfirmed image rolls back on reboot, and a confirmed image stays.
+  unconfirmed image rolls back on reboot, and a confirmed image stays. With USB
+  host active, an image auto-confirmed under the real rule after about 61 s.
+
+- USB host mode works on the real board: a plain USB-C cable from the monitor's
+  touch port runs the StampS3 as host with no computer attached, the panel
+  enumerates through its internal hub, and the firmware receives real USB
+  reports. The panel sends touches on the absolute-mouse interface (report
+  `0x07`) and nothing on the Touch Screen interface, so the gateway is
+  single-touch for now. Forwarding real touches to Android is NOT yet verified:
+  no BLE reports from real panel input, no events seen by Android, no behaviour
+  on screen.
 
 ## Not yet run on hardware
 
-USB host, hub enumeration, the LED, and the touch path.
+The LED, and the touch path beyond receiving USB reports: forwarding real
+touches to Android.
 
 ## Unknown
 
@@ -44,5 +55,6 @@ USB host, hub enumeration, the LED, and the touch path.
 ## Next
 
 1. Verify the no-Feature report map over BLE (forget and re-pair first).
-2. Try connection Option A, then B. Capture real USB reports.
+2. Connection Option A is done; B only if needed. Forward real panel touches to
+   Android and check each stage: BLE reports sent, events seen, on-screen behaviour.
 3. Full integration, then standalone tests.

@@ -55,12 +55,17 @@ Full speed suits the ESP32-S3, which cannot do high speed. The firmware needs US
 hub support (`CONFIG_USB_HOST_HUBS_SUPPORTED`), which ESP-IDF marks as experimental.
 Full descriptors are in `test/host/panel_descriptors.h`.
 
+Measured on the wire, the panel reports touches on the absolute-mouse interface
+(report `0x07`) and sends nothing on the Touch Screen interface by default, so the
+gateway is single-touch for now. Whether a Feature report (`0x0A` or `0x21` in the
+descriptor) enables multi-touch is untested.
+
 Still unknown: whether the port sources VBUS to a sink, and whether the hub and touch
 controller run without VBUS from the host. The monitor is externally powered.
 
 ## Connection options
 
-Nothing below has been tested yet. Option A costs nothing and is safe to try first.
+Option A is verified (see below); B and C are untested. Option A costs nothing and is safe to try first.
 
 ### Option A: plain USB-C cable, powered by the monitor
 
@@ -68,11 +73,10 @@ Nothing below has been tested yet. Option A costs nothing and is safe to try fir
 Monitor touch port --USB-C to USB-C cable-- StampS3 USB-C socket
 ```
 
-Both ends presenting Rd means nothing happens, and no harm is done. It only works if
-the monitor port is dual-role, in which case it sees the StampS3's Rd, turns on
-VBUS and powers the board. The StampS3 can still act as USB host, because the
-power and data roles are independent at this level. The open question is whether
-the monitor connects its touch controller while acting as the power source.
+Verified: with the monitor on external power and no computer attached, a plain
+USB-C to USB-C cable from the monitor's touch port ran the StampS3 in USB host
+mode and enumerated the panel through the internal hub. The power and data roles
+are independent at this level, so the StampS3 still acts as USB host.
 
 Test: monitor on its own power, StampS3 flashed, no other connections. If the LED
 lights, the monitor is sourcing VBUS.
