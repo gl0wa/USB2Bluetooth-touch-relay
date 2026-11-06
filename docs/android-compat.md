@@ -57,11 +57,10 @@ key bits reached the kernel, where Android's `Generic.kl` maps them to
 `DPAD_*`. Sources were `0x1303`. This exercises the descriptor and the
 kernel/InputReader path only.
 
-Over BLE the D-pad mode is verified on screen: entry from the top swipe,
-arrow swipes, Select, the cyan LED and the idle exit all work, including on
-the launcher. Re-pair once after the map change before comparing. The wider
-top zone and slower exit swipe (top 8%, up to 0.8 s) are NOT yet verified
-on hardware.
+Over BLE the user confirmed D-pad mode on screen: entry from the top swipe, arrow
+swipes, the idle exit and the cyan LED, with Back and Home still working in it. Select
+and the launcher's top tabs were not reported separately, and the easier exit swipe
+has been tested only with synthetic swipes.
 
 uhid tests exercise the descriptor and the kernel/InputReader path only; they
 do not exercise HOGP GATT setup (service discovery, Report Reference reads,
