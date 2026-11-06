@@ -84,6 +84,10 @@ def cmd_swipe(args):
     touch(to_raw(args.x2), to_raw(args.y2), False)
 
 
+def cmd_wifi_pause(args):
+    print(call(f"/wifi-pause?s={args.seconds}", "POST", b"").read().decode(), end="")
+
+
 def cmd_post(args):
     print(call(f"/{args.command}", "POST", b"").read().decode(), end="")
 
@@ -113,6 +117,9 @@ def main():
     sub.add_parser("reboot").set_defaults(fn=cmd_post)
     sub.add_parser("forget", help="clear all Bluetooth bonds").set_defaults(fn=cmd_post)
     sub.add_parser("confirm", help="accept the running image, cancelling rollback").set_defaults(fn=cmd_post)
+    p = sub.add_parser("wifi-pause", help="turn Wi-Fi off for a while, to test Bluetooth alone")
+    p.add_argument("seconds", type=int)
+    p.set_defaults(fn=cmd_wifi_pause)
     args = parser.parse_args()
     try:
         args.fn(args)

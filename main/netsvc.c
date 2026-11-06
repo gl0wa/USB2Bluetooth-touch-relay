@@ -179,6 +179,31 @@ static esp_err_t h_reboot(httpd_req_t *r)
     return ESP_OK;
 }
 
+static void wifi_pause_task(void *arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(200)); // let the HTTP response leave first
+    esp_wifi_stop();
+    ESP_LOGW(TAG, "Wi-Fi off for %d s", (int)(intptr_t)arg);
+    vTaskDelay(pdMS_TO_TICKS(1000 * (int)(intptr_t)arg));
+    esp_wifi_start();
+    vTaskDelete(NULL);
+}
+
+// Turns Wi-Fi off for a while, to test Bluetooth without radio sharing.
+static esp_err_t h_wifi_pause(httpd_req_t *r)
+{
+    if (!authorised(r)) {
+        return ESP_OK;
+    }
+    int seconds = query_int(r, "s", 0);
+    if (seconds < 1 || seconds > 600) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "s must be 1..600");
+    }
+    httpd_resp_sendstr(r, "pausing Wi-Fi\n");
+    xTaskCreate(wifi_pause_task, "wifi_pause", 3072, (void *)(intptr_t)seconds, 3, NULL);
+    return ESP_OK;
+}
+
 static esp_err_t h_forget(httpd_req_t *r)
 {
     if (!authorised(r)) {
@@ -263,6 +288,7 @@ static void http_start(void)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.stack_size = 8192;
     cfg.recv_wait_timeout = 15;
+    cfg.max_uri_handlers = 16;
     httpd_handle_t srv;
     ESP_ERROR_CHECK(httpd_start(&srv, &cfg));
     const httpd_uri_t routes[] = {
@@ -274,9 +300,13 @@ static void http_start(void)
         {.uri = "/reboot", .method = HTTP_POST, .handler = h_reboot},
         {.uri = "/forget", .method = HTTP_POST, .handler = h_forget},
         {.uri = "/confirm", .method = HTTP_POST, .handler = h_confirm},
+        {.uri = "/wifi-pause", .method = HTTP_POST, .handler = h_wifi_pause},
     };
     for (size_t i = 0; i < sizeof routes / sizeof routes[0]; i++) {
-        ESP_ERROR_CHECK(httpd_register_uri_handler(srv, &routes[i]));
+        esp_err_t err = httpd_register_uri_handler(srv, &routes[i]);
+        if (err != ESP_OK) { // keep booting: losing one route must not lose OTA
+            ESP_LOGE(TAG, "route %s: %s", routes[i].uri, esp_err_to_name(err));
+        }
     }
 }
 

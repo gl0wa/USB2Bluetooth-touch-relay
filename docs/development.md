@@ -41,6 +41,7 @@ python3 tools/u2b.py log -f      # follow the log
 python3 tools/u2b.py desc        # USB HID report descriptors, as hex
 python3 tools/u2b.py tap 0.5 0.5 # inject a touch into the BLE path
 python3 tools/u2b.py swipe 0.2 0.5 0.8 0.5
+python3 tools/u2b.py wifi-pause 90 # test Bluetooth without Wi-Fi radio sharing
 ```
 
 The device answers at `u2b-touch.local`; set `U2B_HOST` if mDNS is unavailable. Every
@@ -68,6 +69,13 @@ ioreg -r -c IOHIDDevice -l -w0 | grep -E '"(Product|VendorID|ProductID|ReportDes
 ```
 
 Keep serial numbers out of anything committed.
+
+## Reading a crash
+
+Crashes are saved to the `coredump` partition. With the board on USB, run
+`idf.py -p PORT coredump-info` using the build that crashed. `reset_reason` 4 in
+`u2b.py status` means a panic. After a bad OTA the device reports the previous version,
+so check that the partition changed before confirming.
 
 ## Recovery
 

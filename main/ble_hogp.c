@@ -217,6 +217,9 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
             ESP_LOGI(TAG, "touch notifications %s (reason %d)", s_subscribed ? "on" : "off", ev->subscribe.reason);
         }
         break;
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+        ESP_LOGI(TAG, "passkey action %d", ev->passkey.params.action);
+        break;
     case BLE_GAP_EVENT_MTU:
         ESP_LOGI(TAG, "mtu=%u", ev->mtu.value);
         break;
