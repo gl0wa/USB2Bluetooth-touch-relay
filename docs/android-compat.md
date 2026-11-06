@@ -40,9 +40,20 @@ report, as above. That descriptor is verified through uhid only, NOT yet over
 BLE: the uhid test with no Feature report appeared in under 1 s and was still
 classified `touchScreen` in direct mode.
 
+## Touch behaviour in Android TV UI
+
+Works with single touch, user-confirmed on screen: taps land in the right
+place with no calibration, one-finger dragging works, opening apps works,
+Settings can be opened, video progress-bar scrubbing and play/pause work.
+
+Does not work: Android TV is built for D-pad navigation, so some controls do
+not respond to touch, for example the launcher's top tabs. There is no
+on-screen Back or Home, so touch alone cannot leave an app or Settings; the
+remote is still needed.
+
 ## Open questions
 
-- Whether Android TV launcher and app UIs respond usefully to direct touch.
+- Back/Home navigation without the remote (being designed).
 
 ## Pairing investigation
 

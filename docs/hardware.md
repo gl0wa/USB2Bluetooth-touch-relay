@@ -60,8 +60,10 @@ Measured on the wire, the panel reports touches on the absolute-mouse interface
 gateway is single-touch for now. Whether a Feature report (`0x0A` or `0x21` in the
 descriptor) enables multi-touch is untested.
 
-Still unknown: whether the port sources VBUS to a sink, and whether the hub and touch
-controller run without VBUS from the host. The monitor is externally powered.
+In the tested session the StampS3 ran from this port with the cable as its intended
+only connection, which indicates the port sources VBUS (Option A below). VBUS was not
+measured. Still unknown: cold-start behaviour and behaviour after a monitor power
+cycle. The monitor is externally powered.
 
 ## Connection options
 
@@ -76,10 +78,11 @@ Monitor touch port --USB-C to USB-C cable-- StampS3 USB-C socket
 Verified: with the monitor on external power and no computer attached, a plain
 USB-C to USB-C cable from the monitor's touch port ran the StampS3 in USB host
 mode and enumerated the panel through the internal hub. The power and data roles
-are independent at this level, so the StampS3 still acts as USB host.
+are independent at this level, so the StampS3 still acts as USB host. Cold-start
+and monitor power-cycle behaviour is still untested (see `docs/progress.md`).
 
-Test: monitor on its own power, StampS3 flashed, no other connections. If the LED
-lights, the monitor is sourcing VBUS.
+Original test (now done): monitor on its own power, StampS3 flashed, no other
+connections. If the LED lights, the monitor is sourcing VBUS.
 
 ### Option B: standard adapters, 5 V into the headers (expected to work)
 

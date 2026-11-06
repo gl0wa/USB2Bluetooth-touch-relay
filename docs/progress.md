@@ -32,29 +32,52 @@
   enumerates through its internal hub, and the firmware receives real USB
   reports. The panel sends touches on the absolute-mouse interface (report
   `0x07`) and nothing on the Touch Screen interface, so the gateway is
-  single-touch for now. Forwarding real touches to Android is NOT yet verified:
-  no BLE reports from real panel input, no events seen by Android, no behaviour
-  on screen.
+  single-touch for now.
 
-## Not yet run on hardware
+- End to end with real touches: USB touch panel -> StampS3 -> BLE -> SHIELD TV
+  (Android 11), with a plain USB-C to USB-C cable from the monitor's touch port
+  to the StampS3 and the monitor on external power. No Android app needed.
+  On-screen behaviour user-confirmed: taps land in the right place with no
+  calibration, one-finger dragging works, opening apps works, Settings can be
+  opened, video progress-bar scrubbing and play/pause work.
 
-The LED, and the touch path beyond receiving USB reports: forwarding real
-touches to Android.
+- Session counters over about 23 minutes: 4632 USB reports, 4631 touches, 4631
+  BLE reports sent, 0 failed, 0 USB errors. The image auto-confirmed under the
+  OTA rule.
 
 ## Unknown
 
 - Exact StampS3 board revision (the chip and flash are confirmed).
-- VBUS and CC behaviour of the monitor's touch port.
-- Whether ESP-IDF hub support works with the monitor's internal hub.
+- Single touch only: the panel sends touches on its absolute-mouse interface
+  (report `0x07`). Multi-touch through the Touch Screen interface is untested.
+- Android TV is built for D-pad navigation. Some controls do not respond to
+  touch, for example the launcher's top tabs. There is no on-screen Back or
+  Home, so touch alone cannot leave an app or Settings; the remote is still
+  needed.
+- After a reconnect Android takes about 6 s to bring back the input device.
+  The Feature report was removed to fix this, but that is only verified through
+  uhid: re-pairing has not been done since, so whether the delay is gone over
+  BLE is unknown. Android may cache the old map, so forget and re-pair before
+  measuring.
+- Pairing failed while the Shield was streaming audio to a speaker in another
+  room, and worked once it was disconnected. Which factor mattered is unknown.
+  Audio together with touch is untested.
+- Whether the monitor alone powers the StampS3 from a cold start and after a
+  monitor power cycle, and whether USB unplug and replug recover, is not
+  tested. Long-duration stability is not tested.
+- NimBLE logging is still at INFO, left over from debugging.
+- OTA and the HTTP API use plain HTTP with a shared token and unsigned images:
+  development only.
 - One `No route to host` on the first request after boot: seen once, not investigated.
-- Whether the A2DP stream or the distance blocked the first pairing attempts.
-- Whether the no-Feature report map removes the ~6 s delay over BLE (it is
-  verified through uhid only). Android may cache the old map, so retest after
-  forget and re-pair.
+- VBUS and CC behaviour of the monitor's touch port beyond the tested session:
+  the monitor powered the setup there, but cold-start behaviour is untested.
 
 ## Next
 
-1. Verify the no-Feature report map over BLE (forget and re-pair first).
-2. Connection Option A is done; B only if needed. Forward real panel touches to
-   Android and check each stage: BLE reports sent, events seen, on-screen behaviour.
-3. Full integration, then standalone tests.
+1. Forget and re-pair, then measure the reconnect delay over BLE.
+2. Test pairing and touch with the speaker nearby.
+3. Cold-start and USB unplug/replug recovery tests, including after a monitor
+   power cycle.
+4. Long-run stability test.
+5. Set NimBLE logging back to WARNING.
+6. Navigation for Back/Home (being designed).
