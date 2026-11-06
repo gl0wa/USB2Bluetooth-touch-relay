@@ -20,6 +20,8 @@ typedef struct {
     uint32_t hold_ms;      // edge press held this long replays as a touch
     uint16_t dpad_step;    // travel on the dominant axis per D-pad arrow
     uint16_t dpad_tap;     // movement still counted as a tap (Select)
+    uint16_t dpad_top_zone; // top strip width while D-pad mode is active
+    uint32_t dpad_hold_ms; // held edge press that becomes a D-pad contact
     uint32_t dpad_idle_ms; // idle time with no contact that exits D-pad mode
 } gesture_cfg_t;
 

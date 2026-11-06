@@ -37,8 +37,10 @@ Android TV). The setting survives reboot and re-provisioning.
 A D-pad mode covers controls that ignore touch, such as the launcher's
 top tabs. Swipe DOWN from the TOP edge to toggle it. In D-pad mode
 swipes become arrow keys and a tap becomes Select: swipe for Up/Down/
-Left/Right (a long drag repeats), tap for Select. Swipe down from the
-top edge again to leave, or wait 10 s with no contact. The LED is cyan
+Left/Right (a long drag repeats), tap for Select. To leave, swipe down
+from the top 8% of the screen again, or wait 10 s with no contact. A
+slower exit swipe up to 0.8 s is fine; Down swipes that should move
+focus must start lower. The LED is cyan
 in D-pad mode. `gestures off` disables edge gestures and D-pad mode
 together. Edge Back/Home still work while D-pad mode is on.
 

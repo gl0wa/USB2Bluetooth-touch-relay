@@ -52,12 +52,20 @@ def cmd_log(args):
     since = 0
     while True:
         with call(f"/log?since={since}") as r:
-            sys.stdout.write(r.read().decode("utf-8", "replace"))
+            chunk = r.read().decode("utf-8", "replace")
+            sys.stdout.write(chunk)
             sys.stdout.flush()
-            since = int(r.headers["X-Next"])
-        if not args.follow:
-            return
-        time.sleep(0.5)
+            try:
+                nxt = int(r.headers.get("X-Next", since))
+            except (TypeError, ValueError):
+                nxt = since
+            done = len(chunk) == 0 or nxt <= since
+        if done:
+            if not args.follow:
+                return
+            time.sleep(0.5)
+            continue
+        since = nxt
 
 
 def cmd_desc(_):

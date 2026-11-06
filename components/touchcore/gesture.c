@@ -12,6 +12,8 @@ gesture_cfg_t gesture_default_cfg(void)
         .hold_ms = 250,
         .dpad_step = 2500,
         .dpad_tap = 1200,
+        .dpad_top_zone = 2621, // 8%
+        .dpad_hold_ms = 800,
         .dpad_idle_ms = 10000,
     };
 }
@@ -65,6 +67,11 @@ static uint16_t abs_diff_u16(uint16_t a, uint16_t b)
 static bool expired(uint32_t now, uint32_t start, uint32_t hold_ms)
 {
     return (uint32_t)(now - start) >= hold_ms;
+}
+
+static uint32_t hold_limit(const gesture_t *g)
+{
+    return g->dpad ? g->cfg.dpad_hold_ms : g->cfg.hold_ms;
 }
 
 static void emit_touch(gesture_out_t *out, bool down, uint16_t x, uint16_t y)
@@ -176,7 +183,7 @@ void gesture_feed(gesture_t *g, bool down, uint16_t x, uint16_t y, uint32_t now_
         }
         bool left = x < g->cfg.edge;
         bool bottom = y > (uint16_t)(COORD_MAX - g->cfg.edge);
-        bool top = y < g->cfg.edge;
+        bool top = y < (g->dpad ? g->cfg.dpad_top_zone : g->cfg.edge);
         if (!left && !bottom && !top) {
             if (g->dpad) {
                 // Centre press in D-pad mode becomes a D-pad contact.
@@ -301,6 +308,9 @@ void gesture_feed(gesture_t *g, bool down, uint16_t x, uint16_t y, uint32_t now_
     if (g->top_cand && off_x > g->cfg.max_off_axis) {
         g->top_cand = false;
     }
+    if (g->dpad && g->top_cand && (int32_t)y < (int32_t)g->sy - (int32_t)g->cfg.dpad_tap) {
+        g->top_cand = false;
+    }
     if (!g->left_cand && !g->bottom_cand && !g->top_cand) {
         if (g->dpad) {
             enter_dpad_contact(g, out);
@@ -309,7 +319,7 @@ void gesture_feed(gesture_t *g, bool down, uint16_t x, uint16_t y, uint32_t now_
         replay(g, x, y, true, out);
         return;
     }
-    if (expired(now_ms, g->t0, g->cfg.hold_ms)) {
+    if (expired(now_ms, g->t0, hold_limit(g))) {
         if (g->dpad) {
             enter_dpad_contact(g, out);
             return;
@@ -322,7 +332,7 @@ void gesture_feed(gesture_t *g, bool down, uint16_t x, uint16_t y, uint32_t now_
 void gesture_tick(gesture_t *g, uint32_t now_ms, gesture_out_t *out)
 {
     out->n = 0;
-    if (g->st == GESTURE_HELD && g->effective && expired(now_ms, g->t0, g->cfg.hold_ms)) {
+    if (g->st == GESTURE_HELD && g->effective && expired(now_ms, g->t0, hold_limit(g))) {
         if (g->dpad) {
             enter_dpad_contact(g, out);
             return;

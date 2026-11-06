@@ -49,14 +49,19 @@ BLE and touch is unaffected. It is non-standard HOGP. Hosts other than this Andr
 stack may misparse it, so a standard mode exists
 (`hid-mode standard`): normal report IDs, touch only, no keys.
 
-## D-pad report map (uhid only, not yet over BLE or on screen)
+## D-pad report map
 
 The extended Consumer collection (Back/Home plus Up/Down/Left/Right/Select)
-was tested through uhid only: touch stayed `touchScreen` direct mode and the
+was tested through uhid first: touch stayed `touchScreen` direct mode and the
 key bits reached the kernel, where Android's `Generic.kl` maps them to
 `DPAD_*`. Sources were `0x1303`. This exercises the descriptor and the
-kernel/InputReader path only. D-pad keys over BLE and behaviour on screen
-are NOT yet verified; re-pair once after the map change before comparing.
+kernel/InputReader path only.
+
+Over BLE the D-pad mode is verified on screen: entry from the top swipe,
+arrow swipes, Select, the cyan LED and the idle exit all work, including on
+the launcher. Re-pair once after the map change before comparing. The wider
+top zone and slower exit swipe (top 8%, up to 0.8 s) are NOT yet verified
+on hardware.
 
 uhid tests exercise the descriptor and the kernel/InputReader path only; they
 do not exercise HOGP GATT setup (service discovery, Report Reference reads,

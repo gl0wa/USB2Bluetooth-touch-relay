@@ -48,11 +48,10 @@
 - Back and Home work on screen over BLE through edge swipes and the StampS3 button,
   confirmed by the user: 46 key reports sent, 0 failed, alongside 1723 touch reports.
 - After a reconnect the input device returns in about 1.2 s, down from 6-7 s.
-- D-pad report map (Back/Home plus Up/Down/Left/Right/Select) tested through
-  uhid only: touch stays `touchScreen` direct mode, key bits reach the kernel
-  and `Generic.kl` maps them to `DPAD_*` (sources `0x1303`). Needs one re-pair
-  after the map change. D-pad keys over BLE and behaviour on screen are NOT
-  yet verified.
+- D-pad mode confirmed by the user on screen over BLE: entering by top swipe, arrow
+  swipes, the idle exit and the cyan LED. Back and Home keep working inside it. Select
+  is sent, but its on-screen effect and the launcher's top tabs were not reported
+  separately.
 
 ## Unknown
 
@@ -62,7 +61,8 @@
 - Android TV is built for D-pad navigation. Some controls do not respond to
   touch, for example the launcher's top tabs. Back and Home come from edge swipes;
   a D-pad mode (top-edge toggle, swipes to arrows, tap to Select) exists in
-  firmware, but D-pad keys over BLE and behaviour on screen are NOT yet verified.
+  firmware and works on screen over BLE. The wider
+  top zone and slower exit swipe are NOT yet verified on hardware.
 - Pairing failed while the Shield was streaming audio to a speaker in another
   room, and worked once it was disconnected. Which factor mattered is unknown.
   Audio together with touch is untested.
@@ -81,7 +81,7 @@
 
 ## Next
 
-1. Verify D-pad keys over BLE and behaviour on screen.
+1. Verify the wider D-pad exit swipe (top 8%, up to 0.8 s) on screen.
 2. Test pairing and touch with the speaker nearby.
 3. Cold-start and USB unplug/replug recovery tests, including after a monitor
    power cycle.

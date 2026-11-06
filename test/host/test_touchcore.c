@@ -734,14 +734,18 @@ static void test_dpad_strip_hold(void)
     uint32_t now = 0;
     dpad_enter(&g, &o, &now);
     // Strip hold expiry in D-pad mode emits no touch; the contact becomes
-    // a D-pad contact anchored at the start.
+    // a D-pad contact anchored at the start. The hold is longer in D-pad
+    // mode (dpad_hold_ms).
     gesture_feed(&g, true, 100, 16383, now, &o);
     CHECK(o.n == 0);
-    gesture_tick(&g, now + 300, &o);
+    gesture_tick(&g, now + 799, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_is_passthrough(&g));
+    gesture_tick(&g, now + 800, &o);
     CHECK(o.n == 0);
     CHECK(!gesture_is_passthrough(&g));
     // No arrow and no excursion: release gives Select, still no touch.
-    now += 400;
+    now += 900;
     gesture_feed(&g, true, 100 + 2500, 16383, now, &o);
     CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_RIGHT);
     now += 20;
@@ -757,6 +761,177 @@ static void test_dpad_strip_hold(void)
     for (uint8_t i = 0; i < o.n; i++) {
         CHECK(o.ev[i].is_key);
     }
+}
+
+static void test_dpad_exit_wide_zone(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    CHECK(gesture_dpad_active(&g));
+    // 6% of height is below the wide top zone but above the normal edge.
+    gesture_feed(&g, true, 16383, 1966, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, true, 16383, 1966 + 4000, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+    now += 50;
+    gesture_feed(&g, false, 16383, 5966, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_dpad_exit_slow(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    gesture_feed(&g, true, 16383, 100, now, &o);
+    CHECK(o.n == 0);
+    // A slower swipe up to 0.8 s still exits.
+    now += 600;
+    gesture_feed(&g, true, 16383, 100 + 4000, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+    now += 50;
+    gesture_feed(&g, false, 16383, 4100, now, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_normal_wide_zone_passthrough(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    // 6% height is not an edge in normal mode: passes through as touch.
+    gesture_feed(&g, true, 16383, 1966, 0, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 16383 && o.ev[0].y == 1966);
+    gesture_feed(&g, true, 16383, 3000, 50, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    gesture_feed(&g, false, 16383, 3000, 100, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && !o.ev[0].down);
+    CHECK(!gesture_dpad_active(&g));
+}
+
+static void test_normal_top_hold_replay(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    // Top-strip hold in normal mode still replays at hold_ms (250 ms).
+    gesture_feed(&g, true, 16383, 100, 0, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, 249, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, 250, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 16383 && o.ev[0].y == 100);
+
+    g_init(&g);
+    gesture_feed(&g, true, 16383, 100, 0, &o);
+    CHECK(o.n == 0);
+    // Small move after 600 ms: hold long expired, so replay as touch.
+    gesture_feed(&g, true, 16383, 500, 600, &o);
+    CHECK(o.n == 2 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 16383 && o.ev[0].y == 100);
+    CHECK(!o.ev[1].is_key && o.ev[1].down && o.ev[1].x == 16383 && o.ev[1].y == 500);
+}
+
+static void test_dpad_up_from_top(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    gesture_feed(&g, true, 16383, 2600, now, &o);
+    CHECK(o.n == 0);
+    // Move up past dpad_tap: the top candidate drops and the contact
+    // becomes a D-pad contact promptly, without waiting for the hold.
+    now += 50;
+    gesture_feed(&g, true, 16383, 1300, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+    CHECK(!gesture_is_passthrough(&g));
+    now += 50;
+    gesture_feed(&g, true, 16383, 0, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_UP);
+    CHECK(gesture_dpad_active(&g));
+    now += 20;
+    gesture_feed(&g, false, 16383, 0, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_hold_expires_to_dpad(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    gesture_feed(&g, true, 16383, 100, now, &o);
+    CHECK(o.n == 0);
+    uint32_t t0 = now;
+    gesture_tick(&g, t0 + 799, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_is_passthrough(&g));
+    gesture_tick(&g, t0 + 800, &o);
+    CHECK(o.n == 0);
+    CHECK(!gesture_is_passthrough(&g));
+    // A swipe taking over 800 ms gives Down arrows, not exit.
+    now = t0 + 850;
+    gesture_feed(&g, true, 16383, 100 + 2500, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_DOWN);
+    CHECK(gesture_dpad_active(&g));
+    now += 20;
+    gesture_feed(&g, false, 16383, 2600, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_top_tap_select(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // Quick tap inside the wide top zone stays Select.
+    gesture_feed(&g, true, 16383, 1500, now, &o);
+    CHECK(o.n == 0);
+    now += 50;
+    gesture_feed(&g, false, 16390, 1510, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_SELECT && o.ev[0].down);
+    CHECK(o.ev[1].is_key && o.ev[1].key == GESTURE_KEY_SELECT && !o.ev[1].down);
+    for (uint8_t i = 0; i < o.n; i++) {
+        CHECK(o.ev[i].is_key);
+    }
+    CHECK(gesture_dpad_active(&g));
+}
+
+static void test_dpad_below_zone_down(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t now = 0;
+    dpad_enter(&g, &o, &now);
+    // A Down swipe starting below the wide zone gives Down, not exit.
+    gesture_feed(&g, true, 16383, 5000, now, &o);
+    CHECK(o.n == 0);
+    now += 20;
+    gesture_feed(&g, true, 16383, 5000 + 2500, now, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_DOWN);
+    CHECK(gesture_dpad_active(&g));
+    now += 20;
+    gesture_feed(&g, false, 16383, 7500, now, &o);
+    CHECK(o.n == 0);
+    CHECK(gesture_dpad_active(&g));
 }
 
 static void test_dpad_idle(void)
@@ -1044,6 +1219,14 @@ int main(void)
     test_dpad_dead_zone();
     test_dpad_edge_priority();
     test_dpad_strip_hold();
+    test_dpad_exit_wide_zone();
+    test_dpad_exit_slow();
+    test_normal_wide_zone_passthrough();
+    test_normal_top_hold_replay();
+    test_dpad_up_from_top();
+    test_dpad_hold_expires_to_dpad();
+    test_dpad_top_tap_select();
+    test_dpad_below_zone_down();
     test_dpad_idle();
     test_dpad_idle_blocked();
     test_dpad_wrap();
