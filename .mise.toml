@@ -1,0 +1,36 @@
+# Project tooling. ESP-IDF itself comes from its official installer (see
+# docs/development.md); IDF_PATH may be overridden in .mise.local.toml.
+[tools]
+gitleaks = "latest"
+
+[env]
+IDF_PATH = "{{ env.IDF_PATH | default(value=env.HOME ~ '/esp/esp-idf') }}"
+
+[tasks.build]
+description = "Build the firmware"
+run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py build'
+
+[tasks.flash]
+description = "Flash over USB; usage: mise run flash -- /dev/cu.usbmodemXXXX"
+run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py -p "$1" flash'
+
+[tasks.monitor]
+description = "Serial console over USB; usage: mise run monitor -- /dev/cu.usbmodemXXXX"
+run = 'source "$IDF_PATH/export.sh" >/dev/null && idf.py -p "$1" monitor'
+
+[tasks.provision]
+description = "Write Wi-Fi settings and API token over USB; usage: mise run provision -- /dev/cu.usbmodemXXXX"
+run = 'source "$IDF_PATH/export.sh" >/dev/null && python tools/provision.py "$1"'
+
+[tasks.ota]
+description = "Build, then upload the firmware over Wi-Fi"
+depends = ["build"]
+run = "python3 tools/u2b.py ota build/usb2bluetooth-touch-relay.bin"
+
+[tasks.test]
+description = "Run host-side unit tests"
+run = "cmake -S test/host -B build/host -G Ninja >/dev/null && cmake --build build/host && ./build/host/test_touchcore"
+
+[tasks.scan]
+description = "Scan the repository and its history for secrets"
+run = "gitleaks git --no-banner --redact . && gitleaks dir --no-banner --redact ."

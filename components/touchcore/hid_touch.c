@@ -9,7 +9,6 @@
 #define MAX_CANDIDATES 8
 #define MAX_USAGES 16
 #define MAX_REPORT_IDS 16
-#define MAX_DEPTH 8
 #define MAX_GLOBAL_STACK 4
 
 typedef struct {
@@ -150,7 +149,6 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
     offset_t offs[MAX_REPORT_IDS];
     size_t n_offs = 0;
 
-    uint8_t finger_stack[MAX_DEPTH];
     size_t depth = 0;
     uint8_t finger_gen = 0, app = 0;
     uint32_t app_usage = 0;
@@ -222,12 +220,9 @@ bool ht_parse_descriptor(const uint8_t *d, size_t len, ht_layout_t *out)
                 app_usage = usage;
                 app++;
             }
-            if (depth < MAX_DEPTH) {
-                bool finger = usage == U(PAGE_DIGITIZER, 0x22) || usage == U(PAGE_DIGITIZER, 0x20);
-                finger_stack[depth++] = finger;
-                if (finger) {
-                    finger_gen++;
-                }
+            depth++;
+            if (usage == U(PAGE_DIGITIZER, 0x22) || usage == U(PAGE_DIGITIZER, 0x20)) {
+                finger_gen++;
             }
             n_usages = 0;
             have_range = false;
