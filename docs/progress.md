@@ -15,20 +15,24 @@
 - Monitor USB topology and descriptors captured; the parser decodes that layout in
   host tests (`docs/hardware.md`). No real reports captured yet.
 
+- On the real board (ESP32-S3, 8 MB embedded flash): firmware boots, advertises on
+  BLE, joins Wi-Fi, and detects a computer and stays in maintenance mode.
+- OTA on the real board: a wrong token is rejected, upload takes about 20 s, an
+  unconfirmed image rolls back on reboot, and a confirmed image stays.
+
 ## Not yet run on hardware
 
-All firmware: USB host, BLE HID, Wi-Fi, OTA, rollback, mode detection, LED.
+BLE pairing and HID reports, USB host, hub enumeration, the LED, and the touch path.
 
 ## Unknown
 
-- Exact StampS3 revision and flash size.
+- Exact StampS3 board revision (the chip and flash are confirmed).
 - VBUS and CC behaviour of the monitor's touch port.
 - Whether ESP-IDF hub support works with the monitor's internal hub.
-- Which connection option works (`docs/hardware.md`).
+- One `No route to host` on the first request after boot: seen once, not investigated.
 
 ## Next
 
-1. Connect the StampS3 to the Mac: identify it, flash, provision, test one OTA cycle.
-2. Pair with the Shield and test injected touches (BLE path, no monitor needed).
-3. Try connection Option A, then B. Capture real USB reports.
-4. Full integration, then standalone tests.
+1. Pair with the Shield and test injected touches (BLE path, no monitor needed).
+2. Try connection Option A, then B. Capture real USB reports.
+3. Full integration, then standalone tests.
