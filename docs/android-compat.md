@@ -23,6 +23,15 @@ used as the BLE report map, in `main/ble_hogp.c`, and pinned in the host tests.
 **Keep Contact ID in the descriptor**: an IDC file could override the device type,
 but installing one needs root.
 
+## Combined touch plus Back/Home keys
+
+The BLE map appends a Consumer Control collection (report 2: bit0 AC Back,
+bit1 AC Home) after the touch collection, with no Feature report. Through
+uhid Android merged both into one device, Sources `0x1103`, touch stayed
+`touchScreen` in direct mode, and `KEY_HOMEPAGE` and `KEY_BACK` reached the
+kernel. Behaviour over BLE and on screen is NOT yet verified. Adding this
+needs one re-pair: Android may cache the old map.
+
 ## Verified over BLE
 
 Over real BLE (bus `0x0005`) the Shield classifies the gateway as `touchScreen`,
@@ -53,7 +62,10 @@ remote is still needed.
 
 ## Open questions
 
-- Back/Home navigation without the remote (being designed).
+- Back/Home edge-swipe gestures and the button fallback are implemented in
+  firmware, verified through uhid only. Behaviour over BLE and on screen is
+  NOT yet verified.
+- D-pad mode is planned later, not in this change.
 
 ## Pairing investigation
 

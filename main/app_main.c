@@ -11,10 +11,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "gesture.h"
 #include "hid_touch.h"
 #include "led_strip.h"
 #include "logring.h"
 #include "netsvc.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "relay.h"
 #include "touch_map.h"
@@ -27,8 +29,13 @@
 #define ROLLBACK_AFTER_S 180    // give up on an unconfirmed image if Wi-Fi never stabilises
 #define FORGET_HOLD_MS 5000
 #define PRESS_RETRY_MS 200
+#define BUTTON_SHORT_MS 1000
+#define KEY_RETRY_MS 200
+#define GESTURE_NVS_NS "cfg"
+#define GESTURE_NVS_KEY "gestures"
 
 typedef struct {
+    bool is_key; // button Back request; down/x/y ignored
     bool down;
     uint16_t x, y;
 } touch_evt_t;
@@ -37,11 +44,11 @@ static const char *TAG = "app";
 static QueueHandle_t s_touch_q;
 static touch_map_t s_map;
 static led_strip_handle_t s_led;
+static gesture_t s_gesture;
+static bool s_gestures_enabled = true;
 
-void relay_submit(bool down, uint16_t x, uint16_t y)
+static void enqueue(touch_evt_t e)
 {
-    touch_evt_t e = {.down = down};
-    touch_map_apply(&s_map, x, y, &e.x, &e.y);
     if (xQueueSend(s_touch_q, &e, 0) != pdTRUE) {
         // Drop the oldest, so the newest state (possibly a release) always survives.
         touch_evt_t old;
@@ -50,37 +57,136 @@ void relay_submit(bool down, uint16_t x, uint16_t y)
     }
 }
 
-// Coalesces moves when BLE is slower than the panel. `sent_down` follows what the
-// host was actually told, so a lost press is re-sent as a press by the next move,
-// and a release is retried for as long as the connection lasts.
+void relay_submit(bool down, uint16_t x, uint16_t y)
+{
+    touch_evt_t e = {.is_key = false, .down = down};
+    touch_map_apply(&s_map, x, y, &e.x, &e.y);
+    enqueue(e);
+}
+
+void relay_request_back(void)
+{
+    enqueue((touch_evt_t) {.is_key = true});
+}
+
+static bool gestures_load(void)
+{
+    nvs_handle_t h;
+    uint8_t v = 1;
+    if (nvs_open(GESTURE_NVS_NS, NVS_READONLY, &h) == ESP_OK) {
+        if (nvs_get_u8(h, GESTURE_NVS_KEY, &v) != ESP_OK) {
+            v = 1;
+        }
+        nvs_close(h);
+    }
+    return v != 0;
+}
+
+void relay_set_gestures(bool enabled)
+{
+    s_gestures_enabled = enabled;
+    gesture_set_enabled(&s_gesture, enabled);
+    nvs_handle_t h;
+    if (nvs_open(GESTURE_NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, GESTURE_NVS_KEY, enabled ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    ESP_LOGI(TAG, "gestures %s", enabled ? "on" : "off");
+}
+
+bool relay_get_gestures(void)
+{
+    return s_gestures_enabled;
+}
+
+// Same send logic and retry semantics as before, shared by live and replayed touches.
+static void send_touch_evt(bool down, uint16_t x, uint16_t y, bool *sent_down)
+{
+    bool sent = ble_hogp_send_touch(down, x, y);
+    if (!down && *sent_down) {
+        while (!sent && ble_hogp_ready()) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            sent = ble_hogp_send_touch(false, x, y);
+        }
+        *sent_down = false;
+    } else if (down && !*sent_down) {
+        int64_t deadline = esp_timer_get_time() + PRESS_RETRY_MS * 1000;
+        while (!sent && ble_hogp_ready() && esp_timer_get_time() < deadline) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+            sent = ble_hogp_send_touch(true, x, y);
+        }
+        *sent_down = sent;
+    }
+}
+
+static void send_key_bits(uint8_t bits, const char *why)
+{
+    bool sent = ble_hogp_send_keys(bits);
+    int64_t deadline = esp_timer_get_time() + KEY_RETRY_MS * 1000;
+    while (!sent && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        sent = ble_hogp_send_keys(bits);
+    }
+    sent = ble_hogp_send_keys(0);
+    deadline = esp_timer_get_time() + KEY_RETRY_MS * 1000;
+    while (!sent && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        sent = ble_hogp_send_keys(0);
+    }
+    ESP_LOGI(TAG, "%s", why);
+}
+
+// The engine runs here only, the single consumer, so it needs no lock.
+// Move coalescing stays but only while the engine is passing the contact
+// through: a held edge press must keep every sample or it could miss the
+// trigger. On timeout the hold expiry is polled through gesture_tick.
 static void relay_task(void *arg)
 {
     (void)arg;
     touch_evt_t e, next;
     bool sent_down = false;
     for (;;) {
-        xQueueReceive(s_touch_q, &e, portMAX_DELAY);
-        while (e.down && sent_down && xQueuePeek(s_touch_q, &next, 0) == pdTRUE && next.down) {
-            xQueueReceive(s_touch_q, &e, 0);
-        }
-        if (!ble_hogp_ready()) {
-            sent_down = false; // the host drops the contact with the connection
+        if (xQueueReceive(s_touch_q, &e, pdMS_TO_TICKS(20)) != pdTRUE) {
+            gesture_out_t out;
+            gesture_tick(&s_gesture, (uint32_t)(esp_timer_get_time() / 1000), &out);
+            for (uint8_t i = 0; i < out.n; i++) {
+                if (out.ev[i].is_key) {
+                    send_key_bits(out.ev[i].key,
+                                  out.ev[i].key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
+                } else {
+                    if (!ble_hogp_ready()) {
+                        sent_down = false;
+                        continue;
+                    }
+                    send_touch_evt(out.ev[i].down, out.ev[i].x, out.ev[i].y, &sent_down);
+                }
+            }
             continue;
         }
-        bool sent = ble_hogp_send_touch(e.down, e.x, e.y);
-        if (!e.down && sent_down) {
-            while (!sent && ble_hogp_ready()) {
-                vTaskDelay(pdMS_TO_TICKS(5));
-                sent = ble_hogp_send_touch(false, e.x, e.y);
+        if (e.is_key) {
+            if (s_gestures_enabled) {
+                send_key_bits(GESTURE_KEY_BACK, "button Back");
             }
-            sent_down = false;
-        } else if (e.down && !sent_down) {
-            int64_t deadline = esp_timer_get_time() + PRESS_RETRY_MS * 1000;
-            while (!sent && ble_hogp_ready() && esp_timer_get_time() < deadline) {
-                vTaskDelay(pdMS_TO_TICKS(5));
-                sent = ble_hogp_send_touch(true, e.x, e.y);
+            continue;
+        }
+        while (e.down && sent_down && gesture_is_passthrough(&s_gesture) &&
+               xQueuePeek(s_touch_q, &next, 0) == pdTRUE && next.down && !next.is_key) {
+            xQueueReceive(s_touch_q, &e, 0);
+        }
+        gesture_out_t out;
+        gesture_feed(&s_gesture, e.down, e.x, e.y, (uint32_t)(esp_timer_get_time() / 1000), &out);
+        for (uint8_t i = 0; i < out.n; i++) {
+            if (out.ev[i].is_key) {
+                send_key_bits(out.ev[i].key,
+                              out.ev[i].key == GESTURE_KEY_HOME ? "gesture Home" : "gesture Back");
+            } else {
+                if (!ble_hogp_ready()) {
+                    sent_down = false; // the host drops the contact with the connection
+                    continue;
+                }
+                send_touch_evt(out.ev[i].down, out.ev[i].x, out.ev[i].y, &sent_down);
             }
-            sent_down = sent;
         }
     }
 }
@@ -182,8 +288,12 @@ void app_main(void)
     }
 
     touch_map_default(&s_map);
+    s_gestures_enabled = gestures_load();
+    gesture_cfg_t gc = gesture_default_cfg();
+    gc.enabled = s_gestures_enabled;
+    gesture_init(&s_gesture, gc);
     s_touch_q = xQueueCreate(64, sizeof(touch_evt_t));
-    xTaskCreate(relay_task, "relay", 3072, NULL, 7, NULL);
+    xTaskCreate(relay_task, "relay", 4096, NULL, 7, NULL); // logs, so needs room for vsnprintf
 
     ble_hogp_init();
     netsvc_start();
@@ -214,7 +324,10 @@ void app_main(void)
                 set_led(32, 0, 32);
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
-        } else {
+        } else if (held_since) {
+            if (esp_timer_get_time() - held_since < BUTTON_SHORT_MS * 1000LL) {
+                relay_request_back(); // relay_task sends it if gestures are on
+            }
             held_since = 0;
         }
 

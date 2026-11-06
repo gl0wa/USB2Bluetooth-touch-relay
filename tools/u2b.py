@@ -97,6 +97,14 @@ def cmd_wifi_pause(args):
     print(call(f"/wifi-pause?s={args.seconds}", "POST", b"").read().decode(), end="")
 
 
+def cmd_gestures(args):
+    print(call(f"/config?gestures={1 if args.state == 'on' else 0}", "POST", b"").read().decode(), end="")
+
+
+def cmd_key(args):
+    print(call(f"/key?k={args.which}", "POST", b"").read().decode(), end="")
+
+
 def cmd_post(args):
     print(call(f"/{args.command}", "POST", b"").read().decode(), end="")
 
@@ -129,6 +137,12 @@ def main():
     p = sub.add_parser("wifi-pause", help="turn Wi-Fi off for a while, to test Bluetooth alone")
     p.add_argument("seconds", type=int)
     p.set_defaults(fn=cmd_wifi_pause)
+    p = sub.add_parser("gestures", help="edge-swipe Back/Home on or off, persists across reboot")
+    p.add_argument("state", choices=("on", "off"))
+    p.set_defaults(fn=cmd_gestures)
+    p = sub.add_parser("key", help="send a Bluetooth Back/Home key directly, bypasses the switch")
+    p.add_argument("which", choices=("back", "home"))
+    p.set_defaults(fn=cmd_key)
     args = parser.parse_args()
     try:
         args.fn(args)

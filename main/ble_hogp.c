@@ -14,20 +14,24 @@ void ble_store_config_init(void);
 #define DEVICE_NAME "Usb2BT Touch"
 #define APPEARANCE_DIGITIZER 0x03C5
 #define TOUCH_REPORT_ID 1
+#define KEYS_REPORT_ID 2
 #define REPORT_TYPE_INPUT 1
 
 // pid.codes test VID/PID. A project-specific PID can replace it before release.
 #define PNP_VID 0x1209
 #define PNP_PID 0x0002
 
-enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_BATTERY, CHR_PNP, CHR_MFG };
+enum { CHR_REPORT_MAP, CHR_HID_INFO, CHR_CONTROL, CHR_TOUCH, CHR_KEYS, CHR_BATTERY, CHR_PNP, CHR_MFG };
 
 static const char *TAG = "ble";
 
 // Contact ID is what binds Linux hid-multitouch, which sets INPUT_PROP_DIRECT.
 // Without it the Shield maps a digitizer as a pointer. Do not add a Feature
 // report back: the kernel GET_REPORTs it on every reconnect and the resulting
-// timeout delays the input device by about 6 s.
+// timeout delays the input device by about 6 s. The trailing Consumer Control
+// collection (report 2: bit0 AC Back, bit1 AC Home) was tested through uhid:
+// touch stays touchScreen direct and KEY_BACK/KEY_HOMEPAGE reach the kernel.
+// Toggling gestures never re-pairs: the map stays identical when keys are off.
 // See docs/android-compat.md before changing this.
 static const uint8_t s_report_map[] = {
     0x05, 0x0D,       // Usage Page (Digitizer)
@@ -52,14 +56,24 @@ static const uint8_t s_report_map[] = {
     0x09, 0x54,       //   Usage (Contact Count)
     0x15, 0x00, 0x25, 0x0A, 0x75, 0x08, 0x95, 0x01, 0x81, 0x02,
     0xC0,             // End Collection
+    0x05, 0x0C,       // Usage Page (Consumer)
+    0x09, 0x01,       // Usage (Consumer Control)
+    0xA1, 0x01,       // Collection (Application)
+    0x85, KEYS_REPORT_ID,
+    0x0A, 0x24, 0x02, // Usage (AC Back)
+    0x0A, 0x23, 0x02, // Usage (AC Home)
+    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x02, 0x81, 0x02,
+    0x95, 0x06, 0x81, 0x03, // padding
+    0xC0,             // End Collection
 };
 
 static uint16_t s_touch_handle;
+static uint16_t s_keys_handle;
 static uint16_t s_conn = BLE_HS_CONN_HANDLE_NONE;
 static uint8_t s_own_addr_type;
-static volatile bool s_encrypted, s_subscribed;
+static volatile bool s_encrypted, s_subscribed, s_keys_subscribed;
 static volatile uint16_t s_itvl;
-static volatile uint32_t s_sent, s_failed;
+static volatile uint32_t s_sent, s_failed, s_keys_sent;
 
 static void advertise(void);
 
@@ -86,6 +100,10 @@ static int chr_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt 
         static const uint8_t idle[7] = {0};
         return append(ctxt, idle, sizeof idle);
     }
+    case CHR_KEYS: {
+        static const uint8_t idle[1] = {0};
+        return append(ctxt, idle, sizeof idle);
+    }
     case CHR_BATTERY: {
         static const uint8_t level = 100;
         return append(ctxt, &level, 1);
@@ -110,6 +128,7 @@ static int report_ref_access(uint16_t conn, uint16_t attr, struct ble_gatt_acces
 }
 
 static const uint8_t s_touch_ref[] = {TOUCH_REPORT_ID, REPORT_TYPE_INPUT};
+static const uint8_t s_keys_ref[] = {KEYS_REPORT_ID, REPORT_TYPE_INPUT};
 
 #define CHR(u16, id, fl) {.uuid = BLE_UUID16_DECLARE(u16), .access_cb = chr_access, .arg = (void *)(intptr_t)(id), .flags = (fl)}
 #define READ_ENC (BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC)
@@ -148,6 +167,11 @@ static const struct ble_gatt_svc_def s_services[] = {
                 .arg = (void *)(intptr_t)CHR_TOUCH, .flags = READ_ENC | BLE_GATT_CHR_F_NOTIFY,
                 .val_handle = &s_touch_handle, .descriptors = REPORT_REF(s_touch_ref),
             },
+            {
+                .uuid = BLE_UUID16_DECLARE(0x2A4D), .access_cb = chr_access,
+                .arg = (void *)(intptr_t)CHR_KEYS, .flags = READ_ENC | BLE_GATT_CHR_F_NOTIFY,
+                .val_handle = &s_keys_handle, .descriptors = REPORT_REF(s_keys_ref),
+            },
             {0},
         },
     },
@@ -169,7 +193,7 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         ESP_LOGI(TAG, "disconnect reason=0x%x", ev->disconnect.reason);
         s_conn = BLE_HS_CONN_HANDLE_NONE;
-        s_encrypted = s_subscribed = false;
+        s_encrypted = s_subscribed = s_keys_subscribed = false;
         advertise();
         break;
     case BLE_GAP_EVENT_ADV_COMPLETE:
@@ -201,6 +225,9 @@ static int gap_event(struct ble_gap_event *ev, void *arg)
         if (ev->subscribe.attr_handle == s_touch_handle) {
             s_subscribed = ev->subscribe.cur_notify;
             ESP_LOGI(TAG, "touch notifications %s (reason %d)", s_subscribed ? "on" : "off", ev->subscribe.reason);
+        } else if (ev->subscribe.attr_handle == s_keys_handle) {
+            s_keys_subscribed = ev->subscribe.cur_notify;
+            ESP_LOGI(TAG, "keys notifications %s (reason %d)", s_keys_subscribed ? "on" : "off", ev->subscribe.reason);
         }
         break;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
@@ -321,6 +348,21 @@ bool ble_hogp_send_touch(bool down, uint16_t x, uint16_t y)
     return true;
 }
 
+bool ble_hogp_send_keys(uint8_t bits)
+{
+    uint16_t conn = s_conn;
+    if (conn == BLE_HS_CONN_HANDLE_NONE || !s_encrypted || !s_keys_subscribed) {
+        return false;
+    }
+    const uint8_t r[1] = {(uint8_t)(bits & 0x03)};
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(r, sizeof r);
+    if (!om || ble_gatts_notify_custom(conn, s_keys_handle, om) != 0) {
+        return false;
+    }
+    s_keys_sent++;
+    return true;
+}
+
 void ble_hogp_get_status(ble_hogp_status_t *out)
 {
     int bonds = 0;
@@ -333,6 +375,7 @@ void ble_hogp_get_status(ble_hogp_status_t *out)
         .conn_itvl = s_itvl,
         .sent = s_sent,
         .send_failed = s_failed,
+        .keys_sent = s_keys_sent,
     };
 }
 

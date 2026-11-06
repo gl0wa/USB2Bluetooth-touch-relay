@@ -69,17 +69,17 @@ static esp_err_t h_status(httpd_req_t *r)
     wifi_ap_record_t ap = {0};
     esp_wifi_sta_get_ap_info(&ap);
     const esp_partition_t *run = esp_ota_get_running_partition();
-    char out[640];
+    char out[768];
     int n = snprintf(out, sizeof out,
                      "{\"version\":\"%s\",\"partition\":\"%s\",\"unconfirmed\":%d,\"uptime_s\":%" PRIu64 ",\"reset_reason\":%d,"
-                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,"
+                     "\"free_heap\":%" PRIu32 ",\"rssi\":%d,\"gestures\":%d,"
                      "\"ble\":{\"connected\":%d,\"encrypted\":%d,\"subscribed\":%d,\"bonds\":%d,\"itvl\":%u,"
-                     "\"sent\":%" PRIu32 ",\"failed\":%" PRIu32 "},"
+                     "\"sent\":%" PRIu32 ",\"failed\":%" PRIu32 ",\"keys\":%" PRIu32 "},"
                      "\"usb\":{\"host\":%d,\"attached\":%d,\"touch\":%d,\"vid\":%u,\"pid\":%u,\"kind\":%u,"
                      "\"iface\":%u,\"contacts\":%u,\"reports\":%" PRIu32 ",\"touches\":%" PRIu32 ",\"errors\":%" PRIu32 "}}\n",
                      esp_app_get_description()->version, run->label, running_unconfirmed(), (uint64_t)(esp_timer_get_time() / 1000000),
-                     (int)esp_reset_reason(), esp_get_free_heap_size(), ap.rssi,
-                     b.connected, b.encrypted, b.subscribed, b.bonds, b.conn_itvl, b.sent, b.send_failed,
+                     (int)esp_reset_reason(), esp_get_free_heap_size(), ap.rssi, relay_get_gestures() ? 1 : 0,
+                     b.connected, b.encrypted, b.subscribed, b.bonds, b.conn_itvl, b.sent, b.send_failed, b.keys_sent,
                      u.started, u.attached, u.has_touch, u.vid, u.pid, u.kind, u.iface, u.contacts,
                      u.reports, u.touches, u.errors);
     httpd_resp_set_type(r, "application/json");
@@ -198,6 +198,58 @@ static void reboot_later(void *arg)
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
+}
+
+// Persistent edge-gesture switch. Stored in default NVS, namespace "cfg",
+// so re-provisioning (which rewrites devcfg) keeps it. Applies immediately.
+static esp_err_t h_config(httpd_req_t *r)
+{
+    if (!authorised(r)) {
+        return ESP_OK;
+    }
+    int g = query_int(r, "gestures", -1);
+    if (g != 0 && g != 1) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "gestures must be 0 or 1");
+    }
+    relay_set_gestures(g != 0);
+    char out[16];
+    int n = snprintf(out, sizeof out, "gestures=%d\n", g);
+    return httpd_resp_send(r, out, n);
+}
+
+// Sends Back/Home directly, for testing Bluetooth keys without gestures.
+// Works regardless of the switch.
+static esp_err_t h_key(httpd_req_t *r)
+{
+    if (!authorised(r)) {
+        return ESP_OK;
+    }
+    char q[64], v[16];
+    if (httpd_req_get_url_query_str(r, q, sizeof q) != ESP_OK ||
+        httpd_query_key_value(q, "k", v, sizeof v) != ESP_OK) {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back or home");
+    }
+    uint8_t bit;
+    if (strcmp(v, "back") == 0) {
+        bit = 1;
+    } else if (strcmp(v, "home") == 0) {
+        bit = 2;
+    } else {
+        return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "k must be back or home");
+    }
+    bool sent = ble_hogp_send_keys(bit);
+    int64_t deadline = esp_timer_get_time() + 200 * 1000;
+    while (!sent && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        sent = ble_hogp_send_keys(bit);
+    }
+    bool rel = ble_hogp_send_keys(0);
+    deadline = esp_timer_get_time() + 200 * 1000;
+    while (!rel && esp_timer_get_time() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        rel = ble_hogp_send_keys(0);
+    }
+    return httpd_resp_sendstr(r, sent && rel ? "sent\n" : "queued, BLE not ready\n");
 }
 
 static esp_err_t h_reboot(httpd_req_t *r)
@@ -328,6 +380,8 @@ static void http_start(void)
         {.uri = "/usb/desc", .method = HTTP_GET, .handler = h_desc},
         {.uri = "/touch", .method = HTTP_POST, .handler = h_touch},
         {.uri = "/swipe", .method = HTTP_POST, .handler = h_swipe},
+        {.uri = "/config", .method = HTTP_POST, .handler = h_config},
+        {.uri = "/key", .method = HTTP_POST, .handler = h_key},
         {.uri = "/ota", .method = HTTP_POST, .handler = h_ota},
         {.uri = "/reboot", .method = HTTP_POST, .handler = h_reboot},
         {.uri = "/forget", .method = HTTP_POST, .handler = h_forget},

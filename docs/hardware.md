@@ -60,10 +60,12 @@ Measured on the wire, the panel reports touches on the absolute-mouse interface
 gateway is single-touch for now. Whether a Feature report (`0x0A` or `0x21` in the
 descriptor) enables multi-touch is untested.
 
-In the tested session the StampS3 ran from this port with the cable as its intended
-only connection, which indicates the port sources VBUS (Option A below). VBUS was not
-measured. Still unknown: cold-start behaviour and behaviour after a monitor power
-cycle. The monitor is externally powered.
+In the tested session the StampS3 ran from this port, and the user confirmed
+the StampS3 is powered by the monitor alone through the USB-C cable with the
+monitor on external power. That indicates the port sources VBUS (Option A
+below). VBUS was not measured with a meter. Still unknown: cold-start
+behaviour and behaviour after a monitor power cycle. The monitor is
+externally powered.
 
 ## Connection options
 

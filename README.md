@@ -19,13 +19,20 @@ no on-screen Back/Home).
 
 ## What you need
 
-- M5Stack StampS3 (ESP32-S3).
+- ESP32-S3 (tested with M5Stack StampS3)
 - A USB touchscreen monitor whose touch port presents touches this way.
 - A plain USB-C to USB-C cable for the monitor touch port to the StampS3.
 - An Android device supporting BLE HID.
 
 Only one monitor and one Android device have been tested so far
 (see [docs/progress.md](docs/progress.md)).
+
+## Navigation gestures
+
+Android TV has no on-screen Back or Home: swipe in from the LEFT edge
+for Back, up from the BOTTOM edge for Home. Turn them off with
+`python3 tools/u2b.py gestures off` (for example on devices other than
+Android TV). The setting survives reboot and re-provisioning.
 
 ## Connection
 

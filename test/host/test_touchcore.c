@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "gesture.h"
 #include "hid_touch.h"
 #include "touch_map.h"
 #include "panel_descriptors.h"
@@ -8,7 +9,9 @@
 static int failures;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); failures++; } } while (0)
 
-// The exact descriptor verified on the Shield through uhid; also the BLE report map.
+// The touch part of the descriptor verified on the Shield through uhid; also
+// the touch part of the BLE report map. The full BLE map appends the Consumer
+// Back/Home collection (see keys_suffix below).
 static const uint8_t mt_desc[] = {
     0x05,0x0D,0x09,0x04,0xA1,0x01,0x85,0x01,0x09,0x22,0xA1,0x02,0x09,0x42,0x15,0x00,0x25,0x01,0x75,0x01,
     0x95,0x01,0x81,0x02,0x09,0x32,0x81,0x02,0x75,0x06,0x95,0x01,0x81,0x03,0x09,0x51,0x25,0x0F,0x75,0x08,
@@ -247,6 +250,329 @@ static void test_map(void)
     CHECK(x == 16383);
 }
 
+// The Consumer Back/Home suffix appended to the BLE report map (report 2:
+// bit0 AC Back, bit1 AC Home). Byte-exact per the uhid-tested layout.
+static const uint8_t keys_suffix[] = {
+    0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x15,0x00,0x25,0x01,0x75,0x01,
+    0x95,0x02,0x81,0x02,0x95,0x06,0x81,0x03,0xC0};
+
+static void test_report_map_keys(void)
+{
+    static const uint8_t expect[] = {
+        0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x02,0x0A,0x24,0x02,0x0A,0x23,0x02,0x15,0x00,0x25,0x01,0x75,0x01,
+        0x95,0x02,0x81,0x02,0x95,0x06,0x81,0x03,0xC0};
+    CHECK(sizeof keys_suffix == sizeof expect && memcmp(keys_suffix, expect, sizeof expect) == 0);
+    CHECK(sizeof keys_suffix == 29);
+    // The full BLE map (touch part + keys) still parses as the same touchscreen.
+    uint8_t full[sizeof mt_desc + sizeof keys_suffix];
+    memcpy(full, mt_desc, sizeof mt_desc);
+    memcpy(full + sizeof mt_desc, keys_suffix, sizeof keys_suffix);
+    ht_layout_t l;
+    CHECK(ht_parse_descriptor(full, sizeof full, &l));
+    CHECK(l.kind == HT_KIND_TOUCHSCREEN && l.report_id == 1 && l.contacts == 1);
+}
+
+static void g_init(gesture_t *g)
+{
+    gesture_init(g, gesture_default_cfg());
+}
+
+static void test_gesture_disabled(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_set_enabled(&g, false);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100);
+    gesture_feed(&g, true, 5000, 16383, 50, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    gesture_feed(&g, false, 5000, 16383, 100, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && !o.ev[0].down);
+}
+
+static void test_gesture_centre(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 16383, 16383, 0, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    // A press starting outside the strips passes through even at the edge.
+    gesture_feed(&g, true, 100, 16383, 50, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100);
+    gesture_feed(&g, false, 100, 16383, 100, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && !o.ev[0].down);
+}
+
+static void test_gesture_left_back(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 2000, 16383, 50, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 100 + 3277, 16383, 100, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_BACK && o.ev[0].down);
+    CHECK(o.ev[1].is_key && o.ev[1].key == GESTURE_KEY_BACK && !o.ev[1].down);
+    gesture_feed(&g, true, 8000, 16383, 150, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, false, 8000, 16383, 200, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_gesture_bottom_home(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 16383, 32000, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 16383, 32000 - 3277, 100, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key && o.ev[0].key == GESTURE_KEY_HOME && o.ev[0].down);
+    CHECK(o.ev[1].is_key && !o.ev[1].down);
+    gesture_feed(&g, false, 16383, 28000, 150, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_gesture_tap(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, false, 150, 16400, 50, &o);
+    CHECK(o.n == 2 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100 && o.ev[0].y == 16383);
+    CHECK(!o.ev[1].is_key && !o.ev[1].down && o.ev[1].x == 100 && o.ev[1].y == 16383);
+}
+
+static void test_gesture_tick_expiry(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 1000, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, 1000 + 249, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, 1000 + 250, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100);
+    gesture_tick(&g, 1000 + 500, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 500, 16383, 1000 + 500, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 500);
+    gesture_feed(&g, false, 500, 16383, 1000 + 550, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+}
+
+static void test_gesture_feed_expiry(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 200, 16390, 300, &o);
+    CHECK(o.n == 2 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100);
+    CHECK(!o.ev[1].is_key && o.ev[1].down && o.ev[1].x == 200 && o.ev[1].y == 16390);
+    gesture_feed(&g, true, 300, 16390, 350, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key);
+    gesture_feed(&g, false, 300, 16390, 400, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+}
+
+static void test_gesture_off_axis(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 150, 16383 + 2501, 50, &o);
+    CHECK(o.n == 2 && !o.ev[0].is_key && o.ev[0].down && o.ev[0].x == 100);
+    CHECK(o.n == 2 && o.ev[1].x == 150);
+}
+
+static void test_gesture_corner(void)
+{
+    gesture_t g;
+    gesture_out_t o;
+    g_init(&g);
+    gesture_feed(&g, true, 100, 32000, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 100 + 3277, 32000, 50, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_BACK);
+    gesture_feed(&g, false, 5000, 32000, 100, &o);
+    CHECK(o.n == 0);
+
+    g_init(&g);
+    gesture_feed(&g, true, 100, 32000, 0, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 100, 32000 - 3277, 50, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_HOME);
+    gesture_feed(&g, false, 100, 28000, 100, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_gesture_second(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    gesture_feed(&g, true, 100 + 4000, 16383, 50, &o);
+    CHECK(o.n == 2 && o.ev[0].is_key);
+    gesture_feed(&g, false, 8000, 16383, 100, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 16383, 32000, 200, &o);
+    CHECK(o.n == 0);
+    gesture_feed(&g, true, 16383, 32000 - 4000, 250, &o);
+    CHECK(o.n == 2 && o.ev[0].key == GESTURE_KEY_HOME);
+    gesture_feed(&g, false, 16383, 28000, 300, &o);
+    CHECK(o.n == 0);
+}
+
+static void test_gesture_idle_release(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, false, 1000, 2000, 0, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && !o.ev[0].down);
+}
+
+static void test_gesture_wrap(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    uint32_t t0 = 0xFFFFFF00u;
+    gesture_feed(&g, true, 100, 16383, t0, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, t0 + 100, &o);
+    CHECK(o.n == 0);
+    gesture_tick(&g, t0 + 300, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+}
+
+static void test_gesture_toggle_mid(void)
+{
+    gesture_t g;
+    g_init(&g);
+    gesture_out_t o;
+    gesture_feed(&g, true, 100, 16383, 0, &o);
+    CHECK(o.n == 0);
+    gesture_set_enabled(&g, false);
+    gesture_tick(&g, 300, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    gesture_feed(&g, false, 200, 16383, 350, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+    gesture_feed(&g, true, 100, 16383, 400, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key && o.ev[0].down);
+    gesture_feed(&g, false, 100, 16383, 450, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+
+    g_init(&g);
+    gesture_feed(&g, true, 16383, 16383, 0, &o);
+    CHECK(o.n == 1);
+    gesture_set_enabled(&g, false);
+    gesture_feed(&g, false, 16383, 16383, 50, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+    gesture_feed(&g, true, 100, 16383, 100, &o);
+    CHECK(o.n == 1 && !o.ev[0].is_key);
+    gesture_feed(&g, false, 100, 16383, 150, &o);
+    CHECK(o.n == 1 && !o.ev[0].down);
+}
+
+static void test_gesture_random(void)
+{
+    srand(12345);
+    gesture_t g;
+    g_init(&g);
+    bool active = false;
+    int presses = 0, releases = 0;
+    gesture_out_t o;
+    uint32_t now = 0;
+    for (int c = 0; c < 300; c++) {
+        uint16_t sx = (uint16_t)(rand() % 32768);
+        uint16_t sy = (uint16_t)(rand() % 32768);
+        now += (uint32_t)(rand() % 400);
+        gesture_feed(&g, true, sx, sy, now, &o);
+        for (uint8_t i = 0; i < o.n; i++) {
+            if (o.ev[i].is_key) {
+                continue;
+            }
+            if (o.ev[i].down && !active) {
+                active = true;
+                presses++;
+            } else if (!o.ev[i].down && active) {
+                active = false;
+                releases++;
+            }
+            CHECK(presses == releases || presses == releases + 1);
+        }
+        int moves = rand() % 5;
+        for (int m = 0; m < moves; m++) {
+            uint16_t mx = (uint16_t)(rand() % 32768);
+            uint16_t my = (uint16_t)(rand() % 32768);
+            now += (uint32_t)(rand() % 120);
+            gesture_feed(&g, true, mx, my, now, &o);
+            for (uint8_t i = 0; i < o.n; i++) {
+                if (o.ev[i].is_key) {
+                    continue;
+                }
+                if (o.ev[i].down && !active) {
+                    active = true;
+                    presses++;
+                } else if (!o.ev[i].down && active) {
+                    active = false;
+                    releases++;
+                }
+                CHECK(presses == releases || presses == releases + 1);
+            }
+            if (rand() % 3 == 0) {
+                now += (uint32_t)(rand() % 400);
+                gesture_tick(&g, now, &o);
+                for (uint8_t i = 0; i < o.n; i++) {
+                    if (o.ev[i].is_key) {
+                        continue;
+                    }
+                    if (o.ev[i].down && !active) {
+                        active = true;
+                        presses++;
+                    } else if (!o.ev[i].down && active) {
+                        active = false;
+                        releases++;
+                    }
+                    CHECK(presses == releases || presses == releases + 1);
+                }
+            }
+        }
+        uint16_t ex = (uint16_t)(rand() % 32768);
+        uint16_t ey = (uint16_t)(rand() % 32768);
+        now += (uint32_t)(rand() % 400);
+        gesture_feed(&g, false, ex, ey, now, &o);
+        for (uint8_t i = 0; i < o.n; i++) {
+            if (o.ev[i].is_key) {
+                continue;
+            }
+            if (o.ev[i].down && !active) {
+                active = true;
+                presses++;
+            } else if (!o.ev[i].down && active) {
+                active = false;
+                releases++;
+            }
+            CHECK(presses == releases || presses == releases + 1);
+        }
+        CHECK(!active);
+    }
+    CHECK(presses == releases && presses > 0);
+}
+
 int main(void)
 {
     test_mt();
@@ -257,6 +583,21 @@ int main(void)
     test_mice();
     test_robustness();
     test_map();
+    test_report_map_keys();
+    test_gesture_disabled();
+    test_gesture_centre();
+    test_gesture_left_back();
+    test_gesture_bottom_home();
+    test_gesture_tap();
+    test_gesture_tick_expiry();
+    test_gesture_feed_expiry();
+    test_gesture_off_axis();
+    test_gesture_corner();
+    test_gesture_second();
+    test_gesture_idle_release();
+    test_gesture_wrap();
+    test_gesture_toggle_mid();
+    test_gesture_random();
     printf(failures ? "%d FAILED\n" : "all passed\n", failures);
     return failures != 0;
 }

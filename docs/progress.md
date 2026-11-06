@@ -62,15 +62,18 @@
 - Pairing failed while the Shield was streaming audio to a speaker in another
   room, and worked once it was disconnected. Which factor mattered is unknown.
   Audio together with touch is untested.
-- Whether the monitor alone powers the StampS3 from a cold start and after a
-  monitor power cycle, and whether USB unplug and replug recover, is not
-  tested. Long-duration stability is not tested.
+- The user confirmed the StampS3 is powered by the monitor alone through the
+  USB-C cable, with the monitor on external power. Whether it recovers from a
+  cold start and after a monitor power cycle, and whether USB unplug and
+  replug recover, is not tested. Long-duration stability is not tested.
 - NimBLE logging is still at INFO, left over from debugging.
 - OTA and the HTTP API use plain HTTP with a shared token and unsigned images:
   development only.
 - One `No route to host` on the first request after boot: seen once, not investigated.
 - VBUS and CC behaviour of the monitor's touch port beyond the tested session:
-  the monitor powered the setup there, but cold-start behaviour is untested.
+  the user confirmed the monitor powers the StampS3 alone through the USB-C
+  cable with the monitor on external power, but VBUS was not measured with a
+  meter and cold-start behaviour is untested.
 
 ## Next
 
@@ -80,4 +83,6 @@
    power cycle.
 4. Long-run stability test.
 5. Set NimBLE logging back to WARNING.
-6. Navigation for Back/Home (being designed).
+6. Navigation for Back/Home: edge-swipe gestures plus button fallback are
+   implemented and host-tested; behaviour over BLE and on screen NOT yet verified.
+7. D-pad mode is planned later, not in this change.

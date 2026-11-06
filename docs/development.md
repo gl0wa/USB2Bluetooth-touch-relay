@@ -47,6 +47,24 @@ python3 tools/u2b.py wifi-pause 90 # test Bluetooth without Wi-Fi radio sharing
 `swipe` sends a single request; the gateway interpolates the drag on-device,
 submitting a point about every 15 ms.
 
+## Navigation gestures
+
+Android TV has no on-screen Back or Home. Swipe in from the LEFT edge,
+moving right, for Back; swipe up from the BOTTOM edge for Home. A short
+press of the StampS3 button is Back as a fallback. Edge taps and drags
+still work as touches, only slightly late.
+
+```sh
+python3 tools/u2b.py gestures off  # or: on
+python3 tools/u2b.py key back       # test Bluetooth keys without gestures
+```
+
+The switch lives in default NVS (`cfg` namespace), so it survives reboot
+and re-provisioning (which only rewrites `devcfg`). The BLE report map
+stays identical when gestures are off, so toggling never needs re-pairing.
+Turn gestures off for devices other than Android TV, where edge swipes
+should stay touches.
+
 The device answers at `u2b-touch.local`; set `U2B_HOST` if mDNS is unavailable. Every
 endpoint needs the token.
 

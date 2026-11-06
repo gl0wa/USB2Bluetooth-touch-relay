@@ -5,3 +5,9 @@
 
 // Coordinates are normalised to 0..32767. Safe to call from any task.
 void relay_submit(bool down, uint16_t x, uint16_t y);
+// Persistent edge-gesture switch (default NVS, namespace "cfg"). Applies at
+// the next press so the current contact cannot stick.
+void relay_set_gestures(bool enabled);
+bool relay_get_gestures(void);
+// Short button press asking for Back. Consumed by relay_task, obeys the switch.
+void relay_request_back(void);
