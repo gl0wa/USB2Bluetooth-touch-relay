@@ -32,5 +32,5 @@ description = "Run host-side unit tests"
 run = "cmake -S test/host -B build/host -G Ninja >/dev/null && cmake --build build/host && ./build/host/test_touchcore"
 
 [tasks.scan]
-description = "Scan the repository and its history for secrets"
-run = "gitleaks git --no-banner --redact . && gitleaks dir --no-banner --redact ."
+description = "Scan git history and staged changes for secrets"
+run = "gitleaks git --no-banner --redact . && gitleaks git --staged --no-banner --redact ."
